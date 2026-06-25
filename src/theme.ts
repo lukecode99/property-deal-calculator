@@ -21,6 +21,7 @@ export const colors = {
   btl: '#4FC3F7',
   brr: '#CE93D8',
   stl: '#FFB74D',
+  hmo: '#81C784',
 };
 
 export const spacing = {

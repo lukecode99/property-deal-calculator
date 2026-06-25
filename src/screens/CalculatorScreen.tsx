@@ -1,41 +1,721 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Switch,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius, font } from '../theme';
-import { DealInputs, Strategy, Ownership, DEFAULT_INPUTS } from '../types';
+import { DealInputs, DealExtras, Strategy, Ownership, RefurbMode, FeeMode, DEFAULT_INPUTS } from '../types';
 import { calcDeal } from '../engine/dealEngine';
 import { InputField } from '../components/InputField';
+import { SliderField } from '../components/SliderField';
 import { ResultRow, SectionDivider, fmtGbp, fmtPct } from '../components/ResultRow';
 
+interface ForwardRateTenor { baseRate: number; btlRate: number; }
+interface MarketData {
+  fetchedAt: string;
+  baseRate: { value: number; source: string };
+  btlMortgageRate: { value: number; source: string };
+  forwardRates?: {
+    yr1: ForwardRateTenor;
+    yr2: ForwardRateTenor;
+    yr5: ForwardRateTenor;
+    source: string;
+  };
+  housePriceGrowth: { value: number; source: string };
+  rentalGrowth: { value: number; source: string };
+}
+
 const STRATEGIES: { key: Strategy; label: string; color: string }[] = [
-  { key: 'btl', label: 'BTL', color: colors.btl },
-  { key: 'brr', label: 'BRR', color: colors.brr },
+  { key: 'btl', label: 'Buy-to-Let', color: colors.btl },
+  { key: 'hmo', label: 'HMO', color: colors.hmo },
   { key: 'stl', label: 'STL / AirBnB', color: colors.stl },
 ];
+
+interface SavedDeal {
+  id: number;
+  label: string;
+  strategy: Strategy;
+  totalInvested: number;
+  capitalLeftIn?: number;
+  cashOnCash: number;
+  monthlyNetCashflow: number;
+  grossYield: number;
+  netYield: number;
+  stampDuty: number;
+  monthlyMortgage: number;
+  inputs: DealInputs;
+}
+
+type ForwardRates = NonNullable<MarketData['forwardRates']>;
+
+function getForwardRateForTerm(termStr: string, fwd: ForwardRates): { btlRate: number; baseRate: number; tenorLabel: string } {
+  const t = Math.round(parseFloat(termStr) || 2);
+  if (t <= 1) return { ...fwd.yr1, tenorLabel: '1yr' };
+  if (t <= 2) return { ...fwd.yr2, tenorLabel: '2yr' };
+  if (t < 5) {
+    const frac = (t - 2) / 3;
+    return {
+      btlRate: Math.round((fwd.yr2.btlRate + frac * (fwd.yr5.btlRate - fwd.yr2.btlRate)) * 10) / 10,
+      baseRate: Math.round((fwd.yr2.baseRate + frac * (fwd.yr5.baseRate - fwd.yr2.baseRate)) * 10) / 10,
+      tenorLabel: `${t}yr`,
+    };
+  }
+  return { ...fwd.yr5, tenorLabel: '5yr+' };
+}
+
+type CustomItem = { id: string; label: string; amount: string };
+
+let _nextId = 1;
+function newItem(): CustomItem {
+  return { id: String(_nextId++), label: '', amount: '' };
+}
+
+function updateItem(
+  items: CustomItem[],
+  id: string,
+  field: 'label' | 'amount',
+  value: string,
+): CustomItem[] {
+  return items.map(i => (i.id === id ? { ...i, [field]: value } : i));
+}
+
+function sumItems(items: CustomItem[]): number {
+  return items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+}
+
+function CustomItemRows({
+  items,
+  onChange,
+  placeholder,
+  monthly,
+}: {
+  items: CustomItem[];
+  onChange: React.Dispatch<React.SetStateAction<CustomItem[]>>;
+  placeholder: string;
+  monthly?: boolean;
+}) {
+  return (
+    <>
+      {items.map(item => (
+        <View key={item.id} style={styles.customRow}>
+          <TextInput
+            style={styles.customLabel}
+            value={item.label}
+            onChangeText={v => onChange(prev => updateItem(prev, item.id, 'label', v))}
+            placeholder={placeholder}
+            placeholderTextColor={colors.textMuted}
+          />
+          <TextInput
+            style={styles.customAmount}
+            value={item.amount}
+            onChangeText={v => onChange(prev => updateItem(prev, item.id, 'amount', v))}
+            placeholder={monthly ? '£/mo' : '£0'}
+            keyboardType="numeric"
+            placeholderTextColor={colors.textMuted}
+          />
+          <TouchableOpacity
+            style={styles.removeBtn}
+            onPress={() => onChange(prev => prev.filter(i => i.id !== item.id))}
+          >
+            <Text style={styles.removeBtnText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+      <TouchableOpacity style={styles.addBtn} onPress={() => onChange(prev => [...prev, newItem()])}>
+        <Text style={styles.addBtnText}>+ Add cost</Text>
+      </TouchableOpacity>
+    </>
+  );
+}
 
 export function CalculatorScreen() {
   const [inputs, setInputs] = useState<DealInputs>(DEFAULT_INPUTS);
   const [showSdlt, setShowSdlt] = useState(false);
   const [showStress, setShowStress] = useState(false);
   const [showProjection, setShowProjection] = useState(false);
+  const [customRefurb, setCustomRefurb] = useState<CustomItem[]>([]);
+  const [customStlSetup, setCustomStlSetup] = useState<CustomItem[]>([]);
+  const [customStlMonthly, setCustomStlMonthly] = useState<CustomItem[]>([]);
+  const [marketData, setMarketData] = useState<MarketData | null>(null);
+  const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
+  const [editingDealId, setEditingDealId] = useState<number | null>(null);
+  const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning'>('sold');
+
+  type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
+  const [soldPostcode, setSoldPostcode] = useState('');
+  const [soldPrices, setSoldPrices] = useState<SoldSale[] | null>(null);
+  const [soldLoading, setSoldLoading] = useState(false);
+  const [soldError, setSoldError] = useState<string | null>(null);
+
+  type FloodRisk = {
+    level: 'low' | 'medium' | 'high';
+    zone: 1 | 2 | 3;
+    zoneLabel: string;
+    annualProbability: string;
+    fiveYearProbability: string;
+    floodTypes: string[];
+    postcode: string;
+  };
+  const [floodRisk, setFloodRisk] = useState<FloodRisk | null>(null);
+  const [floodLoading, setFloodLoading] = useState(false);
+
+  type PlanningApp = { reference: string; address: string; description: string; decision: string; date: string; url: string };
+  const [planningPostcode, setPlanningPostcode] = useState('');
+  const [planningData, setPlanningData] = useState<PlanningApp[] | null>(null);
+  const [planningLoading, setPlanningLoading] = useState(false);
+  const [planningError, setPlanningError] = useState<string | null>(null);
+  const [planningNote, setPlanningNote] = useState<string | null>(null);
+
+  function formatPostcode(raw: string): string {
+    const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleaned.length >= 5 && cleaned.length <= 7) {
+      return cleaned.slice(0, -3) + ' ' + cleaned.slice(-3);
+    }
+    return cleaned;
+  }
+
+  function isValidPostcode(pc: string): boolean {
+    return /^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$/.test(pc);
+  }
+
+  function lookupSoldPrices() {
+    const pc = formatPostcode(soldPostcode);
+    if (!isValidPostcode(pc)) {
+      setSoldError('Enter a valid UK postcode, e.g. SW1A 2AA');
+      return;
+    }
+    setSoldPostcode(pc);
+    setSoldLoading(true);
+    setSoldError(null);
+    setSoldPrices(null);
+    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => {
+        if (d.error) throw new Error(d.error);
+        setSoldPrices(d.sales ?? []);
+      })
+      .catch(e => setSoldError(e.message ?? 'Lookup failed'))
+      .finally(() => setSoldLoading(false));
+    // Fetch flood risk for this postcode if different from current
+    if (floodRisk?.postcode !== pc) {
+      setFloodRisk(null);
+      setFloodLoading(true);
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+        .then(r => r.json())
+        .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
+        .catch(() => {})
+        .finally(() => setFloodLoading(false));
+    }
+  }
+
+  useEffect(() => {
+    fetch('./market-data.json')
+      .then(r => r.json())
+      .then((d: MarketData) => {
+        setMarketData(d);
+        setInputs(prev => ({
+          ...prev,
+          interestRate: String(d.btlMortgageRate.value),
+          capitalGrowthPct: String(d.housePriceGrowth.value),
+          annualIncomeIncreasePct: String(d.rentalGrowth.value),
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Recalculate expected future rate whenever initial term or market data changes
+  useEffect(() => {
+    if (!marketData?.forwardRates) return;
+    const { btlRate } = getForwardRateForTerm(inputs.mortgageInitialTerm, marketData.forwardRates);
+    setInputs(prev => ({ ...prev, mortgageFutureRate: String(btlRate) }));
+  }, [inputs.mortgageInitialTerm, marketData]);
+
+  useEffect(() => {
+    const pc = formatPostcode(inputs.postcode);
+    if (!isValidPostcode(pc)) { setFloodRisk(null); return; }
+    if (floodRisk?.postcode === pc) return;
+    const timer = setTimeout(() => {
+      setFloodLoading(true);
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+        .then(r => r.json())
+        .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
+        .catch(() => {})
+        .finally(() => setFloodLoading(false));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [inputs.postcode]);
+
+  function lookupPlanning() {
+    const raw = planningPostcode || soldPostcode;
+    const pc = formatPostcode(raw);
+    if (!isValidPostcode(pc)) {
+      setPlanningError('Enter a valid UK postcode, e.g. SW1A 2AA');
+      return;
+    }
+    setPlanningPostcode(pc);
+    setPlanningLoading(true);
+    setPlanningError(null);
+    setPlanningData(null);
+    setPlanningNote(null);
+    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => {
+        if (d.error) throw new Error(d.error);
+        setPlanningData(d.applications ?? []);
+        setPlanningNote(d.note ?? null);
+      })
+      .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
+      .finally(() => setPlanningLoading(false));
+  }
+
+  function exportCSV() {
+    if (savedDeals.length === 0) return;
+    const headers = ['Label', 'Strategy', 'Purchase Price', 'Monthly Rent', 'Total Invested', 'Capital Left In', 'Monthly Cashflow', 'Gross Yield %', 'Net Yield %', 'Cash-on-Cash %', 'Monthly Mortgage', 'Stamp Duty'];
+    const rows = savedDeals.map(d => [
+      d.label,
+      d.strategy,
+      d.inputs.purchasePrice,
+      d.inputs.strategy === 'hmo' ? String(Number(d.inputs.hmoRooms) * Number(d.inputs.hmoRentPerRoom)) : (d.inputs.rentPerMonth || ''),
+      String(Math.round(d.totalInvested)),
+      d.capitalLeftIn != null ? String(Math.round(d.capitalLeftIn)) : '',
+      String(Math.round(d.monthlyNetCashflow)),
+      String(d.grossYield.toFixed(2)),
+      String(d.netYield.toFixed(2)),
+      String(d.cashOnCash.toFixed(2)),
+      String(Math.round(d.monthlyMortgage)),
+      String(Math.round(d.stampDuty)),
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`));
+    const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = 'property-deals.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 
   function set(field: keyof DealInputs) {
     return (val: string) => setInputs(prev => ({ ...prev, [field]: val }));
   }
 
-  const results = useMemo(() => calcDeal(inputs), [inputs]);
+  function saveDeal() {
+    if (!results) return;
+    const label = [inputs.houseNumber, inputs.postcode].filter(Boolean).join(', ');
+    setSavedDeals(prev => {
+      const next = [...prev, {
+        id: Date.now(),
+        label: label || `Deal ${prev.length + 1}`,
+        strategy: inputs.strategy,
+        totalInvested: results.totalInvested,
+        capitalLeftIn: results.capitalLeftIn,
+        cashOnCash: results.cashOnCash,
+        monthlyNetCashflow: results.monthlyNetCashflow,
+        grossYield: results.grossYield,
+        netYield: results.netYield,
+        stampDuty: results.stampDuty,
+        monthlyMortgage: results.monthlyMortgage,
+        inputs: { ...inputs },
+      }];
+      return next;
+    });
+    setView('saved');
+  }
+
+  function updateDeal() {
+    if (!results || editingDealId === null) return;
+    const label = [inputs.houseNumber, inputs.postcode].filter(Boolean).join(', ');
+    setSavedDeals(prev => prev.map(d => d.id === editingDealId ? {
+      ...d,
+      label: label || d.label,
+      strategy: inputs.strategy,
+      totalInvested: results.totalInvested,
+      capitalLeftIn: results.capitalLeftIn,
+      cashOnCash: results.cashOnCash,
+      monthlyNetCashflow: results.monthlyNetCashflow,
+      grossYield: results.grossYield,
+      netYield: results.netYield,
+      stampDuty: results.stampDuty,
+      monthlyMortgage: results.monthlyMortgage,
+      inputs: { ...inputs },
+    } : d));
+    setEditingDealId(null);
+    setView('saved');
+  }
+
+  function loadDealForEdit(deal: SavedDeal) {
+    setInputs({ ...deal.inputs });
+    setEditingDealId(deal.id);
+    setView('calculator');
+  }
+
+  function shareDealReport(deal: SavedDeal) {
+    const stratColors: Record<string, string> = {
+      BTL: '#3B82F6', BRRR: '#8B5CF6', HMO: '#F59E0B', STL: '#10B981', FLIP: '#EF4444',
+    };
+    const color = stratColors[deal.strategy] || '#3B82F6';
+    const f = (n: number, d = 0) => n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deal: ${deal.label}</title>
+<style>
+  body { font-family: -apple-system, sans-serif; margin: 0; padding: 24px; color: #1a1a2e; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .badge { display: inline-block; background: ${color}; color: #fff; border-radius: 6px; padding: 2px 10px; font-size: 13px; font-weight: 700; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .card { background: #f8f9fa; border-radius: 8px; padding: 12px; }
+  .card-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .card-value { font-size: 20px; font-weight: 700; color: ${color}; }
+  .card-sub { font-size: 12px; color: #888; }
+  .section { margin-top: 16px; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+  .row:last-child { border-bottom: none; }
+  footer { margin-top: 24px; font-size: 11px; color: #aaa; text-align: center; }
+</style></head><body>
+<h1>${deal.label}</h1>
+<span class="badge">${deal.strategy}</span>
+<div class="grid">
+  <div class="card"><div class="card-label">Monthly Cash Flow</div><div class="card-value">£${f(deal.monthlyNetCashflow)}</div><div class="card-sub">net / month</div></div>
+  <div class="card"><div class="card-label">Cash-on-Cash Return</div><div class="card-value">${f(deal.cashOnCash, 1)}%</div><div class="card-sub">annual yield on cash</div></div>
+  <div class="card"><div class="card-label">Total Invested</div><div class="card-value">£${f(deal.totalInvested)}</div><div class="card-sub">inc. all costs</div></div>
+  <div class="card"><div class="card-label">${deal.strategy === 'BRRR' ? 'Capital Left In' : 'Gross Yield'}</div><div class="card-value">${deal.strategy === 'BRRR' ? '£' + f(deal.capitalLeftIn ?? 0) : f(deal.grossYield, 1) + '%'}</div></div>
+</div>
+<div class="section">
+  <div class="row"><span>Purchase Price</span><span>£${f(Number(deal.inputs.purchasePrice) || 0)}</span></div>
+  <div class="row"><span>Monthly Rent</span><span>£${f(Number(deal.inputs.monthlyRent) || 0)}</span></div>
+  <div class="row"><span>Monthly Mortgage</span><span>£${f(deal.monthlyMortgage)}</span></div>
+  <div class="row"><span>Net Yield</span><span>${f(deal.netYield, 1)}%</span></div>
+  <div class="row"><span>Stamp Duty</span><span>£${f(deal.stampDuty)}</span></div>
+</div>
+<footer>Generated by Property Deal Calculator</footer>
+</body></html>`;
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      win.print();
+    }
+  }
+
+  const extras = useMemo<DealExtras>(() => ({
+    customRefurbTotal: sumItems(customRefurb),
+    customStlSetupTotal: sumItems(customStlSetup),
+    customStlMonthlyTotal: sumItems(customStlMonthly),
+  }), [customRefurb, customStlSetup, customStlMonthly]);
+
+  const results = useMemo(() => calcDeal(inputs, extras), [inputs, extras]);
 
   const stratColor = STRATEGIES.find(s => s.key === inputs.strategy)?.color ?? colors.primary;
 
+  const futureRateLabel = inputs.mortgageFutureRate
+    ? `Rates at ${inputs.mortgageFutureRate}%`
+    : 'Rates +2%';
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator</Text>
-        <Text style={styles.subtitle}>UK Buy-to-Let, BRR & Short-Term Lets</Text>
+        <Text style={styles.title}>Property Deal Calculator v15</Text>
+        <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
+
+        {/* ── DUE DILIGENCE VIEW ── */}
+        {view === 'duediligence' && (
+          <View>
+            {/* Sub-tab nav */}
+            <View style={styles.ddTabBar}>
+              <TouchableOpacity
+                style={[styles.ddTab, ddTab === 'sold' && styles.ddTabActive]}
+                onPress={() => setDdTab('sold')}
+              >
+                <Text style={[styles.ddTabText, ddTab === 'sold' && styles.ddTabTextActive]}>Sold Prices</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ddTab, ddTab === 'flood' && styles.ddTabActive]}
+                onPress={() => setDdTab('flood')}
+              >
+                <Text style={[styles.ddTabText, ddTab === 'flood' && styles.ddTabTextActive]}>Flood Risk</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ddTab, ddTab === 'planning' && styles.ddTabActive]}
+                onPress={() => setDdTab('planning')}
+              >
+                <Text style={[styles.ddTabText, ddTab === 'planning' && styles.ddTabTextActive]}>Planning</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sold Prices sub-tab */}
+            {ddTab === 'sold' && (
+              <View>
+                <View style={styles.card}>
+                  <View style={styles.soldSearchRow}>
+                    <TextInput
+                      style={styles.soldPostcodeInput}
+                      value={soldPostcode}
+                      onChangeText={setSoldPostcode}
+                      placeholder="e.g. SW1A 2AA"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="characters"
+                      returnKeyType="search"
+                      onSubmitEditing={lookupSoldPrices}
+                    />
+                    <TouchableOpacity
+                      style={[styles.soldSearchBtn, soldLoading && styles.soldSearchBtnDisabled]}
+                      onPress={lookupSoldPrices}
+                      disabled={soldLoading}
+                    >
+                      <Text style={styles.soldSearchBtnText}>{soldLoading ? '…' : 'Search'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {soldError && <Text style={styles.soldError}>{soldError}</Text>}
+                  {soldPrices && soldPrices.length === 0 && (
+                    <Text style={styles.soldNone}>No recent sales found for this postcode.</Text>
+                  )}
+                  {soldPrices && soldPrices.length > 0 && (
+                    <View style={styles.soldTable}>
+                      <View style={styles.soldTableHeader}>
+                        <Text style={[styles.soldColAddress, styles.soldHeaderText]}>Address</Text>
+                        <Text style={[styles.soldColType, styles.soldHeaderText]}>Type</Text>
+                        <Text style={[styles.soldColPrice, styles.soldHeaderText]}>Price</Text>
+                        <Text style={[styles.soldColDate, styles.soldHeaderText]}>Date</Text>
+                      </View>
+                      {soldPrices.map((s, i) => (
+                        <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt]}>
+                          <Text style={styles.soldColAddress} numberOfLines={2}>{s.address}</Text>
+                          <Text style={styles.soldColType} numberOfLines={1}>{s.type}{s.newBuild ? '*' : ''}</Text>
+                          <Text style={styles.soldColPrice}>{fmtGbp(s.price)}</Text>
+                          <Text style={styles.soldColDate}>{s.date ? new Date(s.date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : ''}</Text>
+                        </View>
+                      ))}
+                      <Text style={styles.soldFootnote}>* New build   ·   Source: HM Land Registry</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* Flood Risk sub-tab */}
+            {ddTab === 'flood' && (
+              <View style={styles.card}>
+                <Text style={styles.soldNone}>Enter a postcode in the Calculator tab to trigger flood risk lookup, or use the postcode from your Sold Prices search.</Text>
+                {floodLoading && !floodRisk && <Text style={styles.soldNone}>Looking up flood risk…</Text>}
+                {floodRisk && (
+                  <>
+                    <View style={styles.floodLevelRow}>
+                      <Text style={styles.floodLevelIcon}>
+                        {floodRisk.level === 'low' ? '🟢' : floodRisk.level === 'medium' ? '🟡' : '🔴'}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.floodLevelLabel}>{floodRisk.zoneLabel} — {floodRisk.postcode}</Text>
+                        <Text style={styles.floodLevelSub}>Annual: {floodRisk.annualProbability} · 5-year: {floodRisk.fiveYearProbability}</Text>
+                        {floodRisk.floodTypes.length > 0 && (
+                          <Text style={styles.floodLevelSub}>{floodRisk.floodTypes.join(', ')}</Text>
+                        )}
+                      </View>
+                    </View>
+                    <Text style={styles.floodDisclaimer}>Source: EA Flood Zones via Planning Data (official UK planning classification). Not a substitute for a full flood risk assessment.</Text>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Planning sub-tab */}
+            {ddTab === 'planning' && (
+              <View>
+                <View style={styles.card}>
+                  <View style={styles.soldSearchRow}>
+                    <TextInput
+                      style={styles.soldPostcodeInput}
+                      value={planningPostcode || soldPostcode}
+                      onChangeText={v => setPlanningPostcode(v)}
+                      placeholder="e.g. SW1A 2AA"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="characters"
+                      returnKeyType="search"
+                      onSubmitEditing={lookupPlanning}
+                    />
+                    <TouchableOpacity
+                      style={[styles.soldSearchBtn, planningLoading && styles.soldSearchBtnDisabled]}
+                      onPress={lookupPlanning}
+                      disabled={planningLoading}
+                    >
+                      <Text style={styles.soldSearchBtnText}>{planningLoading ? '…' : 'Search'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {planningError && <Text style={styles.soldError}>{planningError}</Text>}
+                  {planningNote && <Text style={styles.planningNote}>{planningNote}</Text>}
+                  {planningData && planningData.length === 0 && !planningNote && (
+                    <Text style={styles.soldNone}>No planning applications found for this postcode.</Text>
+                  )}
+                  {planningData && planningData.length > 0 && (
+                    <View style={styles.planningList}>
+                      {planningData.map((app, i) => (
+                        <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
+                          <View style={styles.planningRowTop}>
+                            <Text style={styles.planningRef} numberOfLines={1}>{app.reference || '—'}</Text>
+                            {app.decision ? (
+                              <Text style={[styles.planningDecision, {
+                                color: app.decision.toLowerCase().includes('grant') ? colors.positive :
+                                       app.decision.toLowerCase().includes('refus') ? colors.negative : colors.textMuted
+                              }]}>{app.decision}</Text>
+                            ) : null}
+                          </View>
+                          {app.address ? <Text style={styles.planningAddress} numberOfLines={2}>{app.address}</Text> : null}
+                          {app.description ? <Text style={styles.planningDesc} numberOfLines={3}>{app.description}</Text> : null}
+                          {app.date ? <Text style={styles.planningDate}>{new Date(app.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text> : null}
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: planning.data.gov.uk — coverage varies by council. Always check the local authority planning portal for full history.</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── GUIDE VIEW ── */}
+        {view === 'guide' && (
+          <View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>SDLT — Additional Dwelling (2025)</Text>
+              <Text style={styles.guideBody}>5% surcharge applies to all investment properties on top of standard rates:</Text>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£0–£250k</Text><Text style={styles.guidePillVal}>5%</Text></View>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£250k–£925k</Text><Text style={styles.guidePillVal}>10%</Text></View>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£925k–£1.5m</Text><Text style={styles.guidePillVal}>15%</Text></View>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>Over £1.5m</Text><Text style={styles.guidePillVal}>17%</Text></View>
+            </View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>HMO Licensing</Text>
+              <Text style={styles.guideBody}>Mandatory licence required if 5+ tenants from 2+ households share facilities. Many councils extend this to 3–4 tenants. Apply to your local authority — fees typically £500–£2,000, valid 5 years. Fire safety, adequate room sizes (&gt;6.51m²), and kitchen/bathroom ratios are enforced.</Text>
+            </View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>Section 24 (Personal Ownership)</Text>
+              <Text style={styles.guideBody}>Since 2020, individual landlords cannot deduct mortgage interest from rental income before calculating tax. Instead you get a 20% tax credit on interest. Higher/additional rate taxpayers pay more effective tax. Ltd Co ownership avoids this — interest remains a deductible expense against corporation tax (25%).</Text>
+            </View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>HMO Mortgage Notes</Text>
+              <Text style={styles.guideBody}>HMO mortgages are specialist products — fewer lenders, higher rates (typically +0.5–1% vs standard BTL), and stricter criteria. Common LTV cap is 75%. Some lenders require minimum 5 years' experience. Factor in a higher rate in the Finance section when analysing HMO deals.</Text>
+            </View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>BRR (Refinance After Refurb)</Text>
+              <Text style={styles.guideBody}>Buy-Refurb-Refinance: buy below market with bridging/cash, refurb to add value, refinance at new (higher) value to pull capital back out. Goal: get all or most of your money back while keeping the asset. Enable "Refinance after refurb? Yes" in the Finance section to model this.</Text>
+            </View>
+            <View style={styles.guideSection}>
+              <Text style={styles.guideHeading}>STL Rules (Short-Term Let)</Text>
+              <Text style={styles.guideBody}>In England, short-term lets (AirBnB) of entire homes now require planning permission if letting &gt;90 nights/year (from 2024 in some LPAs). Check local council rules. In London, the 90-day rule limits whole-property STLs. Scotland requires a licence. Higher returns but higher ongoing costs and management overhead.</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── SAVED DEALS VIEW ── */}
+        {view === 'saved' && (
+          <View>
+            {savedDeals.length === 0 ? (
+              <View style={styles.emptyResults}>
+                <Text style={styles.emptyText}>No saved deals yet</Text>
+                <Text style={[styles.emptyText, { fontSize: font.sizes.xs, marginTop: 4 }]}>Tap "Save Deal" in the Calculator to compare deals here</Text>
+              </View>
+            ) : (
+              <>
+                <View style={[styles.sectionHeaderRow, { marginBottom: spacing.sm }]}>
+                  <Text style={styles.sectionTitle}>{savedDeals.length} deal{savedDeals.length !== 1 ? 's' : ''} saved</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={styles.csvBtn} onPress={exportCSV}>
+                      <Text style={styles.csvBtnText}>Export CSV</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setSavedDeals([])}>
+                      <Text style={styles.clearAll}>Clear all</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {savedDeals.length >= 2 && (
+                  <View style={styles.compareSection}>
+                    <Text style={[styles.compareTitle, { marginBottom: spacing.sm }]}>Quick Compare</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.compareScroll}>
+                      {savedDeals.map(deal => {
+                        const dc = STRATEGIES.find(s => s.key === deal.strategy)?.color ?? colors.primary;
+                        return (
+                          <View key={deal.id} style={[styles.dealCard, { borderColor: dc, borderWidth: 1 }]}>
+                            <View style={styles.dealCardHeader}>
+                              <Text style={[styles.dealCardStrategy, { color: dc }]}>{deal.strategy.toUpperCase()}</Text>
+                            </View>
+                            <Text style={styles.dealCardAddress} numberOfLines={2}>{deal.label}</Text>
+                            <View style={styles.dealCardDivider} />
+                            <View style={styles.dealCardRow}>
+                              <Text style={styles.dealCardKey}>Cashflow</Text>
+                              <Text style={[styles.dealCardVal, { color: deal.monthlyNetCashflow >= 0 ? colors.positive : colors.negative, fontSize: font.sizes.sm }]}>{fmtGbp(deal.monthlyNetCashflow)}/mo</Text>
+                            </View>
+                            <View style={styles.dealCardRow}>
+                              <Text style={styles.dealCardKey}>CoC return</Text>
+                              <Text style={[styles.dealCardVal, { color: deal.cashOnCash >= 0 ? colors.positive : colors.negative, fontSize: font.sizes.sm }]}>{fmtPct(deal.cashOnCash)}</Text>
+                            </View>
+                            <View style={styles.dealCardRow}>
+                              <Text style={styles.dealCardKey}>Net yield</Text>
+                              <Text style={[styles.dealCardVal, { fontSize: font.sizes.sm }]}>{fmtPct(deal.netYield)}</Text>
+                            </View>
+                            <View style={styles.dealCardRow}>
+                              <Text style={styles.dealCardKey}>Invested</Text>
+                              <Text style={[styles.dealCardVal, { fontSize: font.sizes.sm }]}>{fmtGbp(deal.totalInvested)}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                <View style={styles.savedGrid}>
+                  {savedDeals.map(deal => {
+                    const dealColor = STRATEGIES.find(s => s.key === deal.strategy)?.color ?? colors.primary;
+                    return (
+                      <View key={deal.id} style={[styles.savedCard, { borderColor: dealColor }]}>
+                        <View style={styles.dealCardHeader}>
+                          <View style={[styles.stratBadge, { backgroundColor: dealColor + '22' }]}>
+                            <Text style={[styles.stratBadgeText, { color: dealColor }]}>{deal.strategy.toUpperCase()}</Text>
+                          </View>
+                          <TouchableOpacity onPress={() => setSavedDeals(prev => prev.filter(d => d.id !== deal.id))}>
+                            <Text style={styles.dealCardRemove}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.savedCardAddress} numberOfLines={2}>{deal.label}</Text>
+                        <View style={styles.savedCardDivider} />
+                        <View style={styles.dealCardRow}>
+                          <Text style={styles.dealCardKey}>Upfront capital</Text>
+                          <Text style={styles.dealCardVal}>{fmtGbp(deal.totalInvested)}</Text>
+                        </View>
+                        {deal.capitalLeftIn != null && (
+                          <View style={styles.dealCardRow}>
+                            <Text style={styles.dealCardKey}>Cash left in</Text>
+                            <Text style={styles.dealCardVal}>{fmtGbp(deal.capitalLeftIn)}</Text>
+                          </View>
+                        )}
+                        <View style={styles.dealCardRow}>
+                          <Text style={styles.dealCardKey}>Return on capital</Text>
+                          <Text style={[styles.dealCardVal, { color: deal.cashOnCash >= 0 ? colors.positive : colors.negative }]}>{fmtPct(deal.cashOnCash)}</Text>
+                        </View>
+                        <View style={styles.dealCardRow}>
+                          <Text style={styles.dealCardKey}>Cashflow</Text>
+                          <Text style={[styles.dealCardVal, { color: deal.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>{fmtGbp(deal.monthlyNetCashflow)}/mo</Text>
+                        </View>
+                        <View style={styles.savedCardActions}>
+                          <TouchableOpacity style={[styles.savedCardBtn, { borderColor: dealColor }]} onPress={() => loadDealForEdit(deal)}>
+                            <Text style={[styles.savedCardBtnText, { color: dealColor }]}>✎ Update</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={[styles.savedCardBtn, { borderColor: dealColor }]} onPress={() => shareDealReport(deal)}>
+                            <Text style={[styles.savedCardBtnText, { color: dealColor }]}>⬆ Share</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+          </View>
+        )}
+
+        {/* ── CALCULATOR VIEW ── */}
+        {view === 'calculator' && <>
 
         {/* Strategy tabs */}
         <View style={styles.tabs}>
@@ -50,6 +730,61 @@ export function CalculatorScreen() {
           ))}
         </View>
 
+        {/* Property Details */}
+        <View style={styles.card}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Property Details</Text>
+            <TouchableOpacity
+              style={styles.floodBadge}
+              onPress={() => { const pc = formatPostcode(inputs.postcode); if (isValidPostcode(pc)) { setSoldPostcode(pc); setView('sold'); } }}
+              disabled={!floodRisk && !floodLoading}
+            >
+              {floodLoading ? (
+                <Text style={styles.floodBadgeText}>⏳</Text>
+              ) : floodRisk ? (
+                <Text style={styles.floodBadgeText}>
+                  {floodRisk.level === 'low' ? '🟢' : floodRisk.level === 'medium' ? '🟡' : '🔴'}
+                </Text>
+              ) : (
+                <Text style={[styles.floodBadgeText, { color: colors.textMuted }]}>💧</Text>
+              )}
+              <Text style={styles.floodBadgeLabel}>Flood</Text>
+            </TouchableOpacity>
+          </View>
+          {/* House number + postcode row */}
+          <View style={styles.postcodeRow}>
+            <View style={{ width: '60%', paddingRight: spacing.sm }}>
+              <InputField label="House No. / Name" value={inputs.houseNumber} onChangeText={set('houseNumber')} placeholder="e.g. 12" keyboardType="default" />
+            </View>
+            <View style={{ width: '40%' }}>
+              <InputField label="Postcode" value={inputs.postcode} onChangeText={v => { set('postcode')(v); }} placeholder="SW1A 2AA" keyboardType="default" />
+            </View>
+          </View>
+          <InputField label="Listing URL" value={inputs.url} onChangeText={set('url')} placeholder="e.g. rightmove.co.uk/..." keyboardType="url" />
+
+          {/* Further Details toggle */}
+          <View style={[styles.toggleRow, { marginBottom: spacing.xs }]}>
+            <Text style={styles.label}>Further Details</Text>
+            <View style={styles.segmentRow}>
+              <TouchableOpacity style={[styles.segBtn, inputs.furtherDetails === 'yes' && styles.segBtnActive]} onPress={() => setInputs(prev => ({ ...prev, furtherDetails: 'yes' }))}>
+                <Text style={[styles.segBtnText, inputs.furtherDetails === 'yes' && styles.segBtnTextActive]}>Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.segBtn, inputs.furtherDetails === 'no' && styles.segBtnActive]} onPress={() => setInputs(prev => ({ ...prev, furtherDetails: 'no' }))}>
+                <Text style={[styles.segBtnText, inputs.furtherDetails === 'no' && styles.segBtnTextActive]}>No</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          {inputs.furtherDetails === 'yes' && (
+            <View style={styles.subCard}>
+              <InputField label="EPC Rating" value={inputs.epcRating} onChangeText={set('epcRating')} placeholder="e.g. D" keyboardType="default" />
+              <InputField label="Floor Space" value={inputs.floorSpace} onChangeText={set('floorSpace')} placeholder="e.g. 85" suffix="m²" />
+              <InputField label="Bedrooms" value={inputs.bedrooms} onChangeText={set('bedrooms')} placeholder="e.g. 3" />
+              <InputField label="Bathrooms" value={inputs.bathrooms} onChangeText={set('bathrooms')} placeholder="e.g. 1" />
+              <InputField label="Other Rooms" value={inputs.otherRooms} onChangeText={set('otherRooms')} placeholder="e.g. 2" />
+            </View>
+          )}
+        </View>
+
         {/* Ownership toggle */}
         <View style={styles.card}>
           <View style={styles.toggleRow}>
@@ -57,18 +792,18 @@ export function CalculatorScreen() {
               <Text style={styles.label}>Ownership Structure</Text>
               <Text style={styles.hint}>Affects Section 24 tax treatment</Text>
             </View>
-            <View style={styles.ownershipToggle}>
+            <View style={styles.segmentRow}>
               <TouchableOpacity
-                style={[styles.ownerBtn, inputs.ownership === 'personal' && styles.ownerBtnActive]}
+                style={[styles.segBtn, inputs.ownership === 'personal' && styles.segBtnActive]}
                 onPress={() => setInputs(prev => ({ ...prev, ownership: 'personal' }))}
               >
-                <Text style={[styles.ownerBtnText, inputs.ownership === 'personal' && styles.ownerBtnTextActive]}>Personal</Text>
+                <Text style={[styles.segBtnText, inputs.ownership === 'personal' && styles.segBtnTextActive]}>Personal</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.ownerBtn, inputs.ownership === 'company' && styles.ownerBtnActive]}
+                style={[styles.segBtn, inputs.ownership === 'company' && styles.segBtnActive]}
                 onPress={() => setInputs(prev => ({ ...prev, ownership: 'company' }))}
               >
-                <Text style={[styles.ownerBtnText, inputs.ownership === 'company' && styles.ownerBtnTextActive]}>Ltd Co</Text>
+                <Text style={[styles.segBtnText, inputs.ownership === 'company' && styles.segBtnTextActive]}>Ltd Co</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -83,18 +818,15 @@ export function CalculatorScreen() {
         {/* Purchase */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Purchase Price</Text>
-          <InputField label="Purchase Price" value={inputs.purchasePrice} onChangeText={set('purchasePrice')} prefix="£" placeholder="e.g. 180000" />
-          {inputs.strategy === 'brr' && (
-            <InputField label="Renovated Value (GDV)" value={inputs.renovatedValue} onChangeText={set('renovatedValue')} prefix="£" placeholder="e.g. 250000" hint="Value after refurb — used to calculate new mortgage" />
-          )}
+          <InputField label="Offer Price" value={inputs.purchasePrice} onChangeText={set('purchasePrice')} prefix="£" placeholder="e.g. 180000" />
+          <InputField label="Estimated Fair Value" value={inputs.estimatedFairValue} onChangeText={set('estimatedFairValue')} prefix="£" placeholder="e.g. 200000" hint="Market value — calculates capital on purchase" />
+          <InputField label="Renovated Value (GDV)" value={inputs.renovatedValue} onChangeText={set('renovatedValue')} prefix="£" placeholder="e.g. 250000" hint="Value after refurb — used in 5yr projection" />
         </View>
 
         {/* Purchase costs */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Purchase Costs</Text>
-          <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" />
           <InputField label="Solicitor Fees" value={inputs.solicitorFees} onChangeText={set('solicitorFees')} prefix="£" />
-          <InputField label="Mortgage Arrangement Fee" value={inputs.mortgageFee} onChangeText={set('mortgageFee')} prefix="£" />
           <InputField label="Other Costs" value={inputs.other} onChangeText={set('other')} prefix="£" />
           {results && (
             <TouchableOpacity style={styles.sdltToggle} onPress={() => setShowSdlt(v => !v)}>
@@ -114,16 +846,174 @@ export function CalculatorScreen() {
 
         {/* Refurb */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Refurb</Text>
-          <InputField label="Refurb Cost" value={inputs.refurbCost} onChangeText={set('refurbCost')} prefix="£" placeholder="0" />
-          <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" />
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Refurb</Text>
+            <View style={styles.segmentRow}>
+              <TouchableOpacity
+                style={[styles.segBtn, inputs.refurbMode === 'simple' && styles.segBtnActive]}
+                onPress={() => setInputs(prev => ({ ...prev, refurbMode: 'simple' }))}
+              >
+                <Text style={[styles.segBtnText, inputs.refurbMode === 'simple' && styles.segBtnTextActive]}>Simple</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.segBtn, inputs.refurbMode === 'detailed' && styles.segBtnActive]}
+                onPress={() => setInputs(prev => ({ ...prev, refurbMode: 'detailed' }))}
+              >
+                <Text style={[styles.segBtnText, inputs.refurbMode === 'detailed' && styles.segBtnTextActive]}>Detailed</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {inputs.refurbMode === 'simple' ? (
+            <>
+              <InputField label="Refurb Cost" value={inputs.refurbCost} onChangeText={set('refurbCost')} prefix="£" placeholder="0" />
+              <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" />
+            </>
+          ) : (
+            <>
+              <InputField label="Rip Out & Skip" value={inputs.rd_ripOutSkip} onChangeText={set('rd_ripOutSkip')} prefix="£" placeholder="0" />
+              <InputField label="Kitchen" value={inputs.rd_kitchen} onChangeText={set('rd_kitchen')} prefix="£" placeholder="0" />
+              <InputField label="Electrics" value={inputs.rd_electrics} onChangeText={set('rd_electrics')} prefix="£" placeholder="0" />
+              <InputField label="Bathroom" value={inputs.rd_bathroom} onChangeText={set('rd_bathroom')} prefix="£" placeholder="0" />
+              <InputField label="Plastering" value={inputs.rd_plastering} onChangeText={set('rd_plastering')} prefix="£" placeholder="0" />
+              <InputField label="Internal Doors" value={inputs.rd_internalDoors} onChangeText={set('rd_internalDoors')} prefix="£" placeholder="0" />
+              <InputField label="External Doors" value={inputs.rd_externalDoors} onChangeText={set('rd_externalDoors')} prefix="£" placeholder="0" />
+              <InputField label="Windows" value={inputs.rd_windows} onChangeText={set('rd_windows')} prefix="£" placeholder="0" />
+              <InputField label="Tiling" value={inputs.rd_tiling} onChangeText={set('rd_tiling')} prefix="£" placeholder="0" />
+              <InputField label="Carpet & Flooring" value={inputs.rd_carpet} onChangeText={set('rd_carpet')} prefix="£" placeholder="0" />
+              <InputField label="Boiler & Heating" value={inputs.rd_boilerHeating} onChangeText={set('rd_boilerHeating')} prefix="£" placeholder="0" />
+              <InputField label="Roof" value={inputs.rd_roof} onChangeText={set('rd_roof')} prefix="£" placeholder="0" />
+              <InputField label="Damp Proofing" value={inputs.rd_dampProofing} onChangeText={set('rd_dampProofing')} prefix="£" placeholder="0" />
+              <CustomItemRows items={customRefurb} onChange={setCustomRefurb} placeholder="Custom item" />
+              <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" />
+              {results?.detailedRefurbTotal != null && (
+                <Text style={styles.subtotal}>Subtotal (before contingency): {fmtGbp(results.detailedRefurbTotal)}</Text>
+              )}
+            </>
+          )}
+          <InputField label="Holding Costs" value={inputs.holdingCosts} onChangeText={set('holdingCosts')} prefix="£" placeholder="0" hint="Council tax, utilities, insurance during refurb" />
         </View>
 
         {/* Finance */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Finance</Text>
-          <InputField label="Interest Rate" value={inputs.interestRate} onChangeText={set('interestRate')} suffix="%" placeholder="5.5" />
-          {inputs.strategy === 'brr' && (
+
+          {/* Refinance after refurb toggle */}
+          <View style={[styles.toggleRow, { marginBottom: spacing.sm }]}>
+            <Text style={styles.label}>Refinance after refurb?</Text>
+            <View style={styles.segmentRow}>
+              <TouchableOpacity
+                style={[styles.segBtn, inputs.refinanceAfterRefurb === 'yes' && styles.segBtnActive]}
+                onPress={() => setInputs(prev => ({ ...prev, refinanceAfterRefurb: 'yes' }))}
+              >
+                <Text style={[styles.segBtnText, inputs.refinanceAfterRefurb === 'yes' && styles.segBtnTextActive]}>Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.segBtn, inputs.refinanceAfterRefurb === 'no' && styles.segBtnActive]}
+                onPress={() => setInputs(prev => ({ ...prev, refinanceAfterRefurb: 'no' }))}
+              >
+                <Text style={[styles.segBtnText, inputs.refinanceAfterRefurb === 'no' && styles.segBtnTextActive]}>No</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Initial Financing (inline, when refinancing — bridging only) */}
+          {inputs.refinanceAfterRefurb === 'yes' && (
+            <View style={styles.subCard}>
+              <Text style={styles.subSectionTitle}>Bridging Finance</Text>
+              <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder={inputs.purchasePrice || 'e.g. 180000'} hint="Defaults to purchase price if blank" />
+              <InputField label="Duration (months)" value={inputs.bridgingDurationMonths} onChangeText={set('bridgingDurationMonths')} placeholder="6" />
+              <View style={styles.feeRow}>
+                <View style={styles.feeInput}>
+                  <InputField label="Arrangement Fee" value={inputs.bridgingArrangementFee} onChangeText={set('bridgingArrangementFee')} prefix={inputs.bridgingArrangementFeeMode === 'fixed' ? '£' : undefined} suffix={inputs.bridgingArrangementFeeMode === 'pct' ? '%' : undefined} placeholder={inputs.bridgingArrangementFeeMode === 'pct' ? '2' : '0'} />
+                </View>
+                <View style={styles.feeModeToggle}>
+                  <TouchableOpacity style={[styles.modeBtn, inputs.bridgingArrangementFeeMode === 'pct' && styles.modeBtnActive]} onPress={() => setInputs(prev => ({ ...prev, bridgingArrangementFeeMode: 'pct' }))}><Text style={[styles.modeBtnText, inputs.bridgingArrangementFeeMode === 'pct' && styles.modeBtnTextActive]}>%</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.modeBtn, inputs.bridgingArrangementFeeMode === 'fixed' && styles.modeBtnActive]} onPress={() => setInputs(prev => ({ ...prev, bridgingArrangementFeeMode: 'fixed' }))}><Text style={[styles.modeBtnText, inputs.bridgingArrangementFeeMode === 'fixed' && styles.modeBtnTextActive]}>£</Text></TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.feeRow}>
+                <View style={styles.feeInput}>
+                  <InputField label="Valuation Fee" value={inputs.bridgingValuationFee} onChangeText={set('bridgingValuationFee')} prefix={inputs.bridgingValuationFeeMode === 'fixed' ? '£' : undefined} suffix={inputs.bridgingValuationFeeMode === 'pct' ? '%' : undefined} placeholder={inputs.bridgingValuationFeeMode === 'pct' ? '0.5' : '500'} />
+                </View>
+                <View style={styles.feeModeToggle}>
+                  <TouchableOpacity style={[styles.modeBtn, inputs.bridgingValuationFeeMode === 'pct' && styles.modeBtnActive]} onPress={() => setInputs(prev => ({ ...prev, bridgingValuationFeeMode: 'pct' }))}><Text style={[styles.modeBtnText, inputs.bridgingValuationFeeMode === 'pct' && styles.modeBtnTextActive]}>%</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.modeBtn, inputs.bridgingValuationFeeMode === 'fixed' && styles.modeBtnActive]} onPress={() => setInputs(prev => ({ ...prev, bridgingValuationFeeMode: 'fixed' }))}><Text style={[styles.modeBtnText, inputs.bridgingValuationFeeMode === 'fixed' && styles.modeBtnTextActive]}>£</Text></TouchableOpacity>
+                </View>
+              </View>
+              <InputField label="Monthly Interest Rate" value={inputs.bridgingMonthlyInterestRate} onChangeText={set('bridgingMonthlyInterestRate')} suffix="% /mo" placeholder="0.75" hint="e.g. 0.75% per month" />
+              <InputField label="Exit Fee" value={inputs.bridgingExitFee} onChangeText={set('bridgingExitFee')} prefix="£" placeholder="0" />
+              <InputField label="Broker Fees" value={inputs.bridgingBrokerFees} onChangeText={set('bridgingBrokerFees')} prefix="£" placeholder="0" />
+              <InputField label="Other Fees" value={inputs.bridgingOtherFees} onChangeText={set('bridgingOtherFees')} prefix="£" placeholder="0" />
+            </View>
+          )}
+
+          {/* BTL: mortgage valuation */}
+          {inputs.strategy === 'btl' && (
+            <InputField
+              label="Mortgage Valuation"
+              value={inputs.mortgageValuation}
+              onChangeText={set('mortgageValuation')}
+              prefix="£"
+              placeholder={inputs.purchasePrice || 'e.g. 200000'}
+              hint="Lender's assessed value — leave blank to use purchase price"
+            />
+          )}
+
+          {/* HMO / STL: standard or commercial mortgage type */}
+          {(inputs.strategy === 'hmo' || inputs.strategy === 'stl') && (
+            <View style={[styles.toggleRow, { marginBottom: spacing.sm }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Mortgage Type</Text>
+                <Text style={styles.hint}>Income-based commercial lending</Text>
+              </View>
+              <View style={styles.segmentRow}>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.mortgageType === 'standard' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, mortgageType: 'standard' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.mortgageType === 'standard' && styles.segBtnTextActive]}>Standard</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.mortgageType === 'commercial' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, mortgageType: 'commercial' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.mortgageType === 'commercial' && styles.segBtnTextActive]}>Commercial</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          {(inputs.strategy === 'hmo' || inputs.strategy === 'stl') && inputs.mortgageType === 'commercial' && (
+            <InputField
+              label="Commercial Valuation"
+              value={inputs.commercialValuation}
+              onChangeText={set('commercialValuation')}
+              prefix="£"
+              placeholder="e.g. 350000"
+              hint="Income-based value the lender uses — LTV applied against this"
+            />
+          )}
+
+          <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" />
+          <InputField label="Mortgage Arrangement Fee" value={inputs.mortgageFee} onChangeText={set('mortgageFee')} prefix="£" />
+          {(() => {
+            const midRate = marketData ? marketData.btlMortgageRate.value : 5.5;
+            const irMin = Math.max(0.5, Math.round((midRate - 3) * 2) / 2);
+            const irMax = Math.round((midRate + 3) * 2) / 2;
+            const fetchedAt = marketData ? new Date(marketData.fetchedAt).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+            return (
+              <SliderField
+                label="Interest Rate"
+                value={inputs.interestRate}
+                onChangeText={set('interestRate')}
+                min={irMin} max={irMax} step={0.1} suffix="%" decimals={1}
+                source={marketData ? marketData.btlMortgageRate.source : undefined}
+                note={marketData ? `BoE base rate ${marketData.baseRate.value}% + 1.5% typical BTL spread (${fetchedAt})` : undefined}
+              />
+            );
+          })()}
+          <InputField label="Initial Term" value={inputs.mortgageInitialTerm} onChangeText={set('mortgageInitialTerm')} suffix="yrs" placeholder="2" hint="Fixed period before reversion" />
+          {inputs.refinanceAfterRefurb === 'yes' && (
             <InputField label="New Mortgage LTV (after refurb)" value={inputs.newMortgagePct} onChangeText={set('newMortgagePct')} suffix="%" placeholder="75" hint="LTV on the refinanced product" />
           )}
         </View>
@@ -136,25 +1026,155 @@ export function CalculatorScreen() {
               <InputField label="Nightly Rate" value={inputs.nightlyRate} onChangeText={set('nightlyRate')} prefix="£" placeholder="85" />
               <InputField label="Occupancy" value={inputs.occupancyPct} onChangeText={set('occupancyPct')} suffix="%" placeholder="70" hint="Average % of nights booked" />
             </>
+          ) : inputs.strategy === 'hmo' ? (
+            <>
+              <InputField label="Lettable Rooms" value={inputs.hmoRooms} onChangeText={set('hmoRooms')} placeholder="5" hint="Number of rooms let separately" />
+              <InputField label="Rent per Room / Month" value={inputs.hmoRentPerRoom} onChangeText={set('hmoRentPerRoom')} prefix="£" placeholder="500" />
+              <InputField label="Void (weeks / room / yr)" value={inputs.hmoVoidWeeksPerRoom} onChangeText={set('hmoVoidWeeksPerRoom')} placeholder="2" hint="Average empty weeks per room per year" />
+            </>
           ) : (
             <InputField label="Monthly Rent" value={inputs.rentPerMonth} onChangeText={set('rentPerMonth')} prefix="£" placeholder="900" />
           )}
         </View>
 
+        {/* STL costs — only shown for STL strategy */}
+        {inputs.strategy === 'stl' && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>STL / AirBnB Costs</Text>
+
+            <Text style={styles.subSectionTitle}>Setup (one-time)</Text>
+            <InputField label="Furnishing" value={inputs.stl_furnishing} onChangeText={set('stl_furnishing')} prefix="£" placeholder="0" />
+            <CustomItemRows items={customStlSetup} onChange={setCustomStlSetup} placeholder="Setup item" />
+
+            <Text style={[styles.subSectionTitle, { marginTop: spacing.md }]}>Monthly Running</Text>
+            <InputField label="Cleaning" value={inputs.stl_cleaning} onChangeText={set('stl_cleaning')} prefix="£" placeholder="0" hint="Per month average" />
+            <InputField label="Gardening" value={inputs.stl_gardening} onChangeText={set('stl_gardening')} prefix="£" placeholder="0" />
+            <InputField label="Gas & Electric" value={inputs.stl_gasElectric} onChangeText={set('stl_gasElectric')} prefix="£" placeholder="0" />
+            <InputField label="Internet" value={inputs.stl_internet} onChangeText={set('stl_internet')} prefix="£" placeholder="0" />
+            <InputField label="Additional Maintenance" value={inputs.stl_additionalMaintenance} onChangeText={set('stl_additionalMaintenance')} prefix="£" placeholder="0" />
+            <CustomItemRows items={customStlMonthly} onChange={setCustomStlMonthly} placeholder="Monthly item" monthly />
+          </View>
+        )}
+
+        {/* HMO costs */}
+        {inputs.strategy === 'hmo' && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>HMO Costs</Text>
+
+            <Text style={styles.subSectionTitle}>One-Time Setup</Text>
+            <InputField label="Furnishing per Room" value={inputs.hmoFurnishingPerRoom} onChangeText={set('hmoFurnishingPerRoom')} prefix="£" placeholder="1500" hint="Per room × room count" />
+            <InputField label="HMO Licence Fee" value={inputs.hmoLicenceFee} onChangeText={set('hmoLicenceFee')} prefix="£" placeholder="1000" hint="Mandatory for 5+ tenants; local authority varies" />
+            <InputField label="Fire Safety Works" value={inputs.hmoFireSafety} onChangeText={set('hmoFireSafety')} prefix="£" placeholder="0" hint="Fire doors, interlinked alarms, extinguishers" />
+
+            <Text style={[styles.subSectionTitle, { marginTop: spacing.md }]}>Monthly Running</Text>
+            <View style={[styles.toggleRow, { marginBottom: spacing.sm }]}>
+              <Text style={styles.label}>Bills included in rent?</Text>
+              <View style={styles.segmentRow}>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.hmoBillsIncluded === 'yes' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, hmoBillsIncluded: 'yes' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.hmoBillsIncluded === 'yes' && styles.segBtnTextActive]}>Yes</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.hmoBillsIncluded === 'no' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, hmoBillsIncluded: 'no' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.hmoBillsIncluded === 'no' && styles.segBtnTextActive]}>No</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            {inputs.hmoBillsIncluded === 'yes' && (
+              <InputField label="Utilities / Month" value={inputs.hmoUtilitiesMonthly} onChangeText={set('hmoUtilitiesMonthly')} prefix="£" placeholder="300" hint="Gas, electric, water, broadband combined" />
+            )}
+            <InputField label="Common Area Cleaning / Month" value={inputs.hmoCleaningMonthly} onChangeText={set('hmoCleaningMonthly')} prefix="£" placeholder="150" />
+          </View>
+        )}
+
         {/* OPEX */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Running Costs (OPEX)</Text>
+          <Text style={styles.sectionTitle}>General Costs</Text>
           <InputField label="Service Charge / Ground Rent (annual)" value={inputs.serviceCharge} onChangeText={set('serviceCharge')} prefix="£" placeholder="0" />
           <InputField label="Buildings & Landlord Insurance (annual)" value={inputs.insurance} onChangeText={set('insurance')} prefix="£" placeholder="800" />
           <InputField label="Management Fee" value={inputs.mgmtFeePct} onChangeText={set('mgmtFeePct')} suffix="%" placeholder="10" hint="% of rent — set 0 if self-managing" />
           <InputField label="Maintenance Reserve" value={inputs.maintenancePct} onChangeText={set('maintenancePct')} suffix="%" placeholder="5" hint="% of rent set aside for repairs" />
-          <InputField label="Void Allowance (months/yr)" value={inputs.voidMonths} onChangeText={set('voidMonths')} placeholder="0.5" hint="Average empty months per year" />
+          {inputs.strategy !== 'hmo' && (
+            <InputField label="Void Allowance (months/yr)" value={inputs.voidMonths} onChangeText={set('voidMonths')} placeholder="0.5" hint="Average empty months per year" />
+          )}
         </View>
 
-        {/* 5yr growth */}
+        {/* 5yr projection */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>5-Year Projection</Text>
-          <InputField label="Annual Capital Growth %" value={inputs.capitalGrowthPct} onChangeText={set('capitalGrowthPct')} suffix="%" placeholder="3" hint="Conservative: 2–3%, optimistic: 4–5%" />
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>5-Year Projection</Text>
+            {marketData && (
+              <TouchableOpacity
+                style={styles.resetBtn}
+                onPress={() => {
+                  const fwd = marketData.forwardRates;
+                  const termInfo = fwd ? getForwardRateForTerm(inputs.mortgageInitialTerm, fwd) : null;
+                  setInputs(prev => ({
+                    ...prev,
+                    capitalGrowthPct: String(marketData.housePriceGrowth.value),
+                    annualIncomeIncreasePct: String(marketData.rentalGrowth.value),
+                    mortgageFutureRate: termInfo ? String(termInfo.btlRate) : prev.mortgageFutureRate,
+                  }));
+                }}
+              >
+                <Text style={styles.resetBtnText}>↺ Reset to market data</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {(() => {
+            const midHpg = marketData ? marketData.housePriceGrowth.value : 3.5;
+            const hMin = Math.round(-midHpg);
+            const hMax = Math.round(3 * midHpg);
+            return (
+              <SliderField
+                label="Annual Capital Growth %"
+                value={inputs.capitalGrowthPct}
+                onChangeText={set('capitalGrowthPct')}
+                min={hMin} max={hMax} step={0.5} suffix="%" decimals={1}
+                source={marketData ? marketData.housePriceGrowth.source : undefined}
+                note={marketData ? `UK average annual house price growth. Source: ${marketData.housePriceGrowth.source}.` : undefined}
+              />
+            );
+          })()}
+          {(() => {
+            const midRental = marketData ? marketData.rentalGrowth.value : 5.0;
+            const rMin = Math.round(-midRental);
+            const rMax = Math.round(3 * midRental);
+            return (
+              <SliderField
+                label={inputs.strategy === 'stl' ? 'Annual Nightly Rate Increase %' : 'Annual Rental Increase %'}
+                value={inputs.annualIncomeIncreasePct}
+                onChangeText={set('annualIncomeIncreasePct')}
+                min={rMin} max={rMax} step={0.5} suffix="%" decimals={1}
+                source={marketData ? marketData.rentalGrowth.source : undefined}
+                note={marketData ? `UK private rental price inflation. Source: ${marketData.rentalGrowth.source}. Applied to income each year in 5yr projection.` : undefined}
+              />
+            );
+          })()}
+          {(() => {
+            const fwd = marketData?.forwardRates;
+            const termInfo = fwd ? getForwardRateForTerm(inputs.mortgageInitialTerm, fwd) : null;
+            const midFwd = termInfo?.btlRate ?? 5.0;
+            const fMin = Math.round(-midFwd);
+            const fMax = Math.round(3 * midFwd);
+            const fwdSource = fwd?.source ?? 'SONIA OIS swap rates';
+            return (
+              <SliderField
+                label="Expected Future Rate"
+                value={inputs.mortgageFutureRate}
+                onChangeText={set('mortgageFutureRate')}
+                min={fMin} max={fMax} step={0.1} suffix="%" decimals={1}
+                source={termInfo ? `${termInfo.tenorLabel} fwd: ${termInfo.btlRate}%` : undefined}
+                note={termInfo
+                  ? `Market-implied BoE base rate in ${termInfo.tenorLabel}: ${termInfo.baseRate}% + 1.5% BTL spread. Source: ${fwdSource}.`
+                  : `Rate at end of initial term — used for stress test & 5yr projection`}
+              />
+            );
+          })()}
         </View>
 
         {/* Results */}
@@ -163,20 +1183,54 @@ export function CalculatorScreen() {
             <Text style={[styles.resultsTitle, { color: stratColor }]}>Results</Text>
 
             <SectionDivider title="Costs Summary" />
-            <ResultRow label="Deposit" value={fmtGbp(results.mortgageAmount > 0 ? parseFloat(inputs.purchasePrice.replace(/,/g,'') || '0') * parseFloat(inputs.depositPct || '0') / 100 : 0)} />
+            {results.capitalOnPurchase != null && (
+              <ResultRow
+                label="Capital on Purchase"
+                value={fmtGbp(results.capitalOnPurchase)}
+                highlight={results.capitalOnPurchase > 0}
+                negative={results.capitalOnPurchase < 0}
+              />
+            )}
+            <ResultRow label="Deposit" value={fmtGbp(parseFloat(inputs.purchasePrice.replace(/,/g, '') || '0') * parseFloat(inputs.depositPct || '0') / 100)} />
             <ResultRow label="Stamp Duty (SDLT)" value={fmtGbp(results.stampDuty)} />
             <ResultRow label="Total Purchase Costs" value={fmtGbp(results.totalPurchaseCosts)} />
+            {inputs.strategy === 'stl' && results.stlSetupCost > 0 && (
+              <ResultRow label="STL Setup Cost" value={fmtGbp(results.stlSetupCost)} />
+            )}
+            {inputs.strategy === 'hmo' && results.hmoSetupCost > 0 && (
+              <ResultRow label="HMO Setup Cost" value={fmtGbp(results.hmoSetupCost)} />
+            )}
             <ResultRow label="Total Capital Invested" value={fmtGbp(results.totalInvested)} highlight />
 
             <SectionDivider title="Mortgage" />
+            {results.commercialInvestmentValue != null && (
+              <ResultRow label="Commercial Valuation" value={fmtGbp(results.commercialInvestmentValue)} muted />
+            )}
             <ResultRow label="Mortgage Amount" value={fmtGbp(results.mortgageAmount)} />
             <ResultRow label="Monthly Payment (IO)" value={fmtGbp(results.monthlyMortgage)} />
+            {results.monthlyFutureMortgage != null && (
+              <ResultRow
+                label={`At Future Rate (${inputs.mortgageFutureRate}%)`}
+                value={fmtGbp(results.monthlyFutureMortgage)}
+                muted
+              />
+            )}
 
-            {inputs.strategy === 'brr' && results.newMortgageAmount != null && (
+            {inputs.refinanceAfterRefurb === 'yes' && results.initialFinancingCost != null && (
+              <>
+                <SectionDivider title="Bridging Finance" />
+                {results.initialFinancingInterest != null && (
+                  <ResultRow label="Total Interest" value={fmtGbp(results.initialFinancingInterest)} muted indent />
+                )}
+                <ResultRow label="Total Financing Cost" value={fmtGbp(results.initialFinancingCost)} negative />
+              </>
+            )}
+
+            {inputs.refinanceAfterRefurb === 'yes' && results.newMortgageAmount != null && (
               <>
                 <SectionDivider title="BRR — Refinance" />
                 <ResultRow label="New Mortgage (after refurb)" value={fmtGbp(results.newMortgageAmount)} />
-                <ResultRow label="Capital Extracted" value={fmtGbp(results.valueExtracted ?? 0)} highlight={( results.valueExtracted ?? 0) > 0} negative={(results.valueExtracted ?? 0) < 0} />
+                <ResultRow label="Capital Extracted" value={fmtGbp(results.valueExtracted ?? 0)} highlight={(results.valueExtracted ?? 0) > 0} negative={(results.valueExtracted ?? 0) < 0} />
                 <ResultRow label="Capital Left In" value={fmtGbp(results.capitalLeftIn ?? 0)} highlight />
               </>
             )}
@@ -185,6 +1239,12 @@ export function CalculatorScreen() {
             <ResultRow label="Monthly Gross Income" value={fmtGbp(results.monthlyGrossIncome)} />
             <ResultRow label="Monthly Mortgage" value={fmtGbp(-results.monthlyMortgage)} negative />
             <ResultRow label="Monthly OPEX" value={fmtGbp(-results.monthlyOpex)} negative />
+            {inputs.strategy === 'stl' && results.stlMonthlyCosts > 0 && (
+              <ResultRow label="  STL Running Costs" value={fmtGbp(-results.stlMonthlyCosts)} negative indent muted />
+            )}
+            {inputs.strategy === 'hmo' && results.hmoMonthlyCosts > 0 && (
+              <ResultRow label="  HMO Running Costs" value={fmtGbp(-results.hmoMonthlyCosts)} negative indent muted />
+            )}
             <ResultRow label="Monthly Net Cashflow" value={fmtGbp(results.monthlyNetCashflow)} highlight={results.monthlyNetCashflow > 0} negative={results.monthlyNetCashflow < 0} />
             <ResultRow label="Annual Net Cashflow" value={fmtGbp(results.annualNetCashflow)} highlight={results.annualNetCashflow > 0} negative={results.annualNetCashflow < 0} />
 
@@ -202,14 +1262,14 @@ export function CalculatorScreen() {
               <View style={styles.stressBox}>
                 <Text style={styles.stressNote}>Monthly cashflow under adverse conditions:</Text>
                 <ResultRow label="Rent drops 10%" value={fmtGbp(results.stress.rent10pctDrop)} negative={results.stress.rent10pctDrop < 0} />
-                <ResultRow label="Rates rise 2%" value={fmtGbp(results.stress.rates2pctRise)} negative={results.stress.rates2pctRise < 0} />
+                <ResultRow label={futureRateLabel} value={fmtGbp(results.stress.ratesAtFutureRate)} negative={results.stress.ratesAtFutureRate < 0} />
                 <ResultRow label="4-week void" value={fmtGbp(results.stress.void4weeks)} negative={results.stress.void4weeks < 0} />
               </View>
             )}
 
             {/* 5yr projection */}
             <TouchableOpacity style={styles.expandRow} onPress={() => setShowProjection(v => !v)}>
-              <Text style={styles.expandLabel}>5-Year Projection ({inputs.capitalGrowthPct}% growth/yr)</Text>
+              <Text style={styles.expandLabel}>5-Year Projection ({inputs.capitalGrowthPct}% growth, {inputs.annualIncomeIncreasePct}% income/yr)</Text>
               <Text style={styles.expandChevron}>{showProjection ? '▲' : '▼'}</Text>
             </TouchableOpacity>
             {showProjection && (
@@ -221,6 +1281,20 @@ export function CalculatorScreen() {
               </View>
             )}
 
+          {editingDealId !== null ? (
+            <View style={styles.editingActionRow}>
+              <TouchableOpacity style={[styles.saveBtn, { borderColor: stratColor, flex: 1, marginRight: 8 }]} onPress={updateDeal}>
+                <Text style={[styles.saveBtnText, { color: stratColor }]}>✓ Update Deal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveBtn, { borderColor: colors.textMuted, flex: 1 }]} onPress={() => { setEditingDealId(null); setView('saved'); }}>
+                <Text style={[styles.saveBtnText, { color: colors.textMuted }]}>✕ Exit</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={[styles.saveBtn, { borderColor: stratColor }]} onPress={saveDeal}>
+              <Text style={[styles.saveBtnText, { color: stratColor }]}>+ Save Deal</Text>
+            </TouchableOpacity>
+          )}
           </View>
         ) : (
           <View style={styles.emptyResults}>
@@ -228,8 +1302,29 @@ export function CalculatorScreen() {
           </View>
         )}
 
-        <View style={{ height: 40 }} />
+        </> /* end calculator view */}
+
+        <View style={{ height: 16 }} />
       </ScrollView>
+
+      {/* Bottom navigation */}
+      <View style={styles.bottomNav}>
+        {([
+          { key: 'calculator', label: 'Calculator', icon: '⌗' },
+          { key: 'duediligence', label: 'Due Diligence', icon: '🔍' },
+          { key: 'saved', label: `Saved${savedDeals.length > 0 ? ` (${savedDeals.length})` : ''}`, icon: '⊞' },
+          { key: 'guide', label: 'Guide', icon: '⊙' },
+        ] as { key: typeof view; label: string; icon: string }[]).map(tab => (
+          <TouchableOpacity
+            key={tab.key}
+            style={styles.bottomNavTab}
+            onPress={() => setView(tab.key)}
+          >
+            <Text style={[styles.bottomNavIcon, view === tab.key && styles.bottomNavActive]}>{tab.icon}</Text>
+            <Text style={[styles.bottomNavLabel, view === tab.key && styles.bottomNavActive]}>{tab.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </SafeAreaView>
   );
 }
@@ -240,6 +1335,85 @@ const styles = StyleSheet.create({
   content: { padding: spacing.md },
   title: { color: colors.text, fontSize: font.sizes.xl, fontWeight: '700', marginBottom: 2 },
   subtitle: { color: colors.textSecondary, fontSize: font.sizes.sm, marginBottom: spacing.md },
+
+  bottomNav: {
+    flexDirection: 'row',
+    backgroundColor: colors.tabBar,
+    borderTopWidth: 1,
+    borderTopColor: colors.tabBarBorder,
+    paddingVertical: spacing.xs,
+  },
+  bottomNavTab: { flex: 1, alignItems: 'center', paddingVertical: spacing.xs },
+  bottomNavIcon: { fontSize: 18, color: colors.tabBarInactive, marginBottom: 2 },
+  bottomNavLabel: { fontSize: 10, color: colors.tabBarInactive, fontWeight: '600' },
+  bottomNavActive: { color: colors.tabBarActive },
+
+  guideSection: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, borderWidth: 1, borderColor: colors.border },
+  guideHeading: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: spacing.xs },
+  guideBody: { color: colors.textSecondary, fontSize: font.sizes.sm, lineHeight: 20, marginBottom: spacing.xs },
+  guidePill: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: colors.border },
+  guidePillLabel: { color: colors.textSecondary, fontSize: font.sizes.sm },
+  guidePillVal: { color: colors.primary, fontSize: font.sizes.sm, fontWeight: '700' },
+
+  ddTabBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 4,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  ddTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: radius.sm },
+  ddTabActive: { backgroundColor: colors.primary },
+  ddTabText: { fontSize: font.sizes.sm, fontWeight: '600', color: colors.textSecondary },
+  ddTabTextActive: { color: '#fff' },
+
+  postcodeRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: spacing.xs },
+  floodBadge: { alignItems: 'center', justifyContent: 'center', width: 44, flexShrink: 0 },
+  floodBadgeText: { fontSize: 22, lineHeight: 28 },
+  floodBadgeLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '600', marginTop: 1 },
+
+  floodLevelRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.sm },
+  floodLevelIcon: { fontSize: 28, lineHeight: 34 },
+  floodLevelLabel: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: 2 },
+  floodLevelSub: { color: colors.textSecondary, fontSize: font.sizes.sm },
+  floodAreaList: { backgroundColor: colors.surface2, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
+  floodAreaRow: { paddingVertical: 8, paddingHorizontal: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  floodAreaLabel: { color: colors.text, fontSize: font.sizes.sm, fontWeight: '600' },
+  floodAreaMeta: { color: colors.textMuted, fontSize: font.sizes.xs, marginTop: 2 },
+  floodDisclaimer: { color: colors.textMuted, fontSize: 10, fontStyle: 'italic' },
+
+  soldTabHeader: { marginBottom: spacing.md },
+  soldTabTitle: { color: colors.text, fontSize: font.sizes.xl, fontWeight: '700', marginBottom: 4 },
+  soldTabSubtitle: { color: colors.textMuted, fontSize: font.sizes.sm },
+  soldSearchRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  soldPostcodeInput: { flex: 1, backgroundColor: colors.inputBg, color: colors.inputText, fontSize: font.sizes.md, paddingVertical: 10, paddingHorizontal: spacing.sm, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border },
+  soldSearchBtn: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: spacing.md, borderRadius: radius.sm, justifyContent: 'center' },
+  soldSearchBtnDisabled: { opacity: 0.5 },
+  soldSearchBtnText: { color: '#fff', fontSize: font.sizes.md, fontWeight: '700' },
+  soldError: { color: colors.negative, fontSize: font.sizes.xs, marginBottom: spacing.sm },
+  soldNone: { color: colors.textMuted, fontSize: font.sizes.sm, marginBottom: spacing.sm },
+  soldTable: { borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  soldTableHeader: { flexDirection: 'row', backgroundColor: colors.surface2, paddingVertical: 8, paddingHorizontal: 6 },
+  soldHeaderText: { color: colors.textSecondary, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  soldTableRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 6, alignItems: 'flex-start' },
+  soldTableRowAlt: { backgroundColor: colors.surface2 + '55' },
+  soldColAddress: { flex: 3, color: colors.text, fontSize: 11, paddingRight: 4 },
+  soldColType: { flex: 2, color: colors.textSecondary, fontSize: 11, paddingRight: 4 },
+  soldColPrice: { flex: 2, color: colors.primary, fontSize: 11, fontWeight: '700', textAlign: 'right', paddingRight: 4 },
+  soldColDate: { flex: 1.5, color: colors.textMuted, fontSize: 10, textAlign: 'right' },
+  soldFootnote: { color: colors.textMuted, fontSize: 10, padding: 6, borderTopWidth: 1, borderTopColor: colors.border },
+
+  savedGrid: { gap: spacing.md },
+  savedCard: { backgroundColor: colors.surface2, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
+  savedCardAddress: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: spacing.sm, lineHeight: 22 },
+  savedCardDivider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
+  savedCardActions: { flexDirection: 'row', gap: 8, marginTop: spacing.sm },
+  savedCardBtn: { flex: 1, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1, alignItems: 'center' },
+  savedCardBtnText: { fontSize: font.sizes.xs, fontWeight: '700' },
+  stratBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm },
+  stratBadgeText: { fontSize: font.sizes.sm, fontWeight: '700' },
 
   tabs: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   tab: {
@@ -258,19 +1432,25 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   sectionTitle: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: spacing.sm },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  subSectionTitle: { color: colors.textSecondary, fontSize: font.sizes.sm, fontWeight: '600', marginBottom: spacing.xs },
+  subCard: { backgroundColor: colors.surface2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.sm },
   label: { color: colors.text, fontSize: font.sizes.md, fontWeight: '600' },
   hint: { color: colors.textMuted, fontSize: font.sizes.xs, marginTop: 2 },
+  subtotal: { color: colors.textSecondary, fontSize: font.sizes.sm, marginTop: spacing.xs, textAlign: 'right' },
 
+  resetBtn: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryMuted },
+  resetBtnText: { color: colors.primary, fontSize: font.sizes.xs, fontWeight: '600' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
-  ownershipToggle: { flexDirection: 'row', gap: spacing.xs },
-  ownerBtn: {
+  segmentRow: { flexDirection: 'row', gap: spacing.xs },
+  segBtn: {
     paddingHorizontal: spacing.sm, paddingVertical: 6,
     borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
     backgroundColor: colors.surface2,
   },
-  ownerBtnActive: { borderColor: colors.primary, backgroundColor: colors.primaryMuted },
-  ownerBtnText: { color: colors.textSecondary, fontSize: font.sizes.sm },
-  ownerBtnTextActive: { color: colors.primary, fontWeight: '600' },
+  segBtnActive: { borderColor: colors.primary, backgroundColor: colors.primaryMuted },
+  segBtnText: { color: colors.textSecondary, fontSize: font.sizes.sm },
+  segBtnTextActive: { color: colors.primary, fontWeight: '600' },
   taxNote: { color: colors.warning, fontSize: font.sizes.xs, marginTop: 2 },
   taxNoteGreen: { color: colors.positive, fontSize: font.sizes.xs, marginTop: 2 },
 
@@ -279,6 +1459,43 @@ const styles = StyleSheet.create({
   sdltChevron: { color: colors.textMuted, fontSize: font.sizes.sm },
   sdltBreakdown: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.xs },
   sdltNote: { color: colors.textMuted, fontSize: font.sizes.xs, marginBottom: spacing.xs, fontStyle: 'italic' },
+
+  customRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs },
+  customLabel: {
+    flex: 1, color: colors.text, fontSize: font.sizes.sm,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, paddingVertical: 8,
+    backgroundColor: colors.surface2,
+  },
+  customAmount: {
+    width: 80, color: colors.text, fontSize: font.sizes.sm,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm, paddingVertical: 8,
+    backgroundColor: colors.surface2, textAlign: 'right',
+  },
+  removeBtn: {
+    width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.sm, backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border,
+  },
+  removeBtnText: { color: colors.textMuted, fontSize: 12 },
+  addBtn: {
+    paddingVertical: 8, alignItems: 'center',
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+    borderStyle: 'dashed', marginTop: spacing.xs,
+  },
+  addBtnText: { color: colors.textSecondary, fontSize: font.sizes.sm },
+
+  feeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs },
+  feeInput: { flex: 1 },
+  feeModeToggle: { flexDirection: 'row', gap: 2, marginBottom: 6 },
+  modeBtn: {
+    width: 30, height: 30, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  modeBtnActive: { borderColor: colors.primary, backgroundColor: colors.primaryMuted },
+  modeBtnText: { color: colors.textSecondary, fontSize: font.sizes.sm, fontWeight: '600' },
+  modeBtnTextActive: { color: colors.primary },
 
   results: {
     backgroundColor: colors.surface,
@@ -310,4 +1527,55 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   emptyText: { color: colors.textMuted, fontSize: font.sizes.md },
+
+  saveBtn: {
+    marginTop: spacing.md,
+    paddingVertical: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  saveBtnText: { fontSize: font.sizes.sm, fontWeight: '700' },
+  editingActionRow: { flexDirection: 'row', marginTop: spacing.md },
+
+  compareSection: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  compareTitle: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700' },
+  clearAll: { color: colors.textMuted, fontSize: font.sizes.xs },
+  csvBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryMuted },
+  csvBtnText: { color: colors.primary, fontSize: font.sizes.xs, fontWeight: '700' },
+  planningNote: { color: colors.textMuted, fontSize: font.sizes.xs, fontStyle: 'italic', marginBottom: spacing.sm },
+  planningList: { borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginBottom: spacing.sm },
+  planningRow: { padding: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  planningRowAlt: { backgroundColor: colors.surface2 + '55' },
+  planningRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  planningRef: { color: colors.textSecondary, fontSize: 10, fontWeight: '700', flex: 1, paddingRight: 4 },
+  planningDecision: { fontSize: 10, fontWeight: '700' },
+  planningAddress: { color: colors.text, fontSize: font.sizes.sm, marginBottom: 2 },
+  planningDesc: { color: colors.textMuted, fontSize: font.sizes.xs, lineHeight: 16, marginBottom: 2 },
+  planningDate: { color: colors.textMuted, fontSize: 10 },
+  compareScroll: { paddingTop: spacing.sm, gap: spacing.sm },
+
+  dealCard: {
+    width: 160,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.sm,
+  },
+  dealCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  dealCardStrategy: { fontSize: font.sizes.sm, fontWeight: '700' },
+  dealCardRemove: { color: colors.textMuted, fontSize: 16, paddingLeft: spacing.sm },
+  dealCardAddress: { color: colors.text, fontSize: font.sizes.md, fontWeight: '600', marginBottom: spacing.sm, lineHeight: 22 },
+  dealCardDivider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
+  dealCardRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
+  dealCardKey: { color: colors.textMuted, fontSize: font.sizes.sm },
+  dealCardVal: { color: colors.text, fontSize: font.sizes.md, fontWeight: '600' },
 });

@@ -15,7 +15,10 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.lukeholder.propertydealcalc"
+      "bundleIdentifier": "com.lukeholder.propertydealcalc",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

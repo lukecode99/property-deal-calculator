@@ -9,7 +9,7 @@ interface Props {
   prefix?: string;
   suffix?: string;
   placeholder?: string;
-  keyboardType?: 'numeric' | 'decimal-pad';
+  keyboardType?: 'numeric' | 'decimal-pad' | 'default' | 'url';
   hint?: string;
 }
 
@@ -36,12 +36,14 @@ export function InputField({ label, value, onChangeText, prefix, suffix, placeho
 }
 
 const styles = StyleSheet.create({
-  wrapper: { marginBottom: spacing.sm },
+  wrapper: { marginBottom: spacing.sm, minWidth: 0 },
   label: { color: colors.textSecondary, fontSize: font.sizes.sm, marginBottom: 4 },
   hint: { color: colors.textMuted, fontSize: font.sizes.xs, marginBottom: 4 },
   row: { flexDirection: 'row', alignItems: 'center' },
   input: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
     backgroundColor: colors.inputBg,
     color: colors.inputText,
     fontSize: font.sizes.md,
