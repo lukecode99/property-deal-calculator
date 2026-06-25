@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-06-25T22:06:53.249Z",
+  "fetchedAt": "2026-06-25T22:13:33.112Z",
   "baseRate": {
     "value": 3.75,
     "source": "Bank of England"
@@ -10,12 +10,12 @@
   },
   "forwardRates": {
     "yr1": {
-      "baseRate": 3.6,
-      "btlRate": 5.1
+      "baseRate": 3.75,
+      "btlRate": 5.3
     },
     "yr2": {
-      "baseRate": 3.4,
-      "btlRate": 4.9
+      "baseRate": 3.5,
+      "btlRate": 5
     },
     "yr5": {
       "baseRate": 3,
