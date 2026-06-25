@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-06-25T19:19:18.163Z",
+  "fetchedAt": "2026-06-25T19:34:25.456Z",
   "baseRate": {
     "value": 3.75,
     "source": "Bank of England"
@@ -18,8 +18,8 @@
       "btlRate": 5.2
     },
     "yr5": {
-      "baseRate": 3.3,
-      "btlRate": 4.8
+      "baseRate": 3.2,
+      "btlRate": 4.7
     },
     "source": "Market-implied (SONIA OIS / analyst consensus)"
   },
