@@ -43,6 +43,8 @@ interface SavedDeal {
   netYield: number;
   stampDuty: number;
   monthlyMortgage: number;
+  fiveYearTotalReturn?: number;
+  floodRiskLevel?: 'low' | 'medium' | 'high';
   inputs: DealInputs;
 }
 
@@ -140,7 +142,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -167,6 +169,13 @@ export function CalculatorScreen() {
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [planningNote, setPlanningNote] = useState<string | null>(null);
 
+  type EpcResult = { address: string; rating: string; validUntil: string; expired: boolean; certUrl: string; floorArea: string | null };
+  const [epcData, setEpcData] = useState<EpcResult[] | null>(null);
+  const [epcLoading, setEpcLoading] = useState(false);
+  const [epcError, setEpcError] = useState<string | null>(null);
+
+  const [ddPostcode, setDdPostcode] = useState('');
+
   function formatPostcode(raw: string): string {
     const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (cleaned.length >= 5 && cleaned.length <= 7) {
@@ -179,8 +188,8 @@ export function CalculatorScreen() {
     return /^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$/.test(pc);
   }
 
-  function lookupSoldPrices() {
-    const pc = formatPostcode(soldPostcode);
+  function lookupSoldPrices(overridePostcode?: string) {
+    const pc = formatPostcode(overridePostcode ?? soldPostcode);
     if (!isValidPostcode(pc)) {
       setSoldError('Enter a valid UK postcode, e.g. SW1A 2AA');
       return;
@@ -207,6 +216,46 @@ export function CalculatorScreen() {
         .catch(() => {})
         .finally(() => setFloodLoading(false));
     }
+  }
+
+  function lookupAllDd() {
+    const pc = formatPostcode(ddPostcode);
+    if (!isValidPostcode(pc)) {
+      setSoldError('Enter a valid UK postcode, e.g. SW1A 2AA');
+      return;
+    }
+    setDdPostcode(pc);
+    setSoldPostcode(pc);
+    setPlanningPostcode(pc);
+    // Sold prices
+    setSoldLoading(true); setSoldError(null); setSoldPrices(null);
+    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setSoldPrices(d.sales ?? []); })
+      .catch(e => setSoldError(e.message ?? 'Lookup failed'))
+      .finally(() => setSoldLoading(false));
+    // Flood risk
+    if (floodRisk?.postcode !== pc) {
+      setFloodRisk(null); setFloodLoading(true);
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+        .then(r => r.json())
+        .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
+        .catch(() => {}).finally(() => setFloodLoading(false));
+    }
+    // Planning
+    setPlanningLoading(true); setPlanningError(null); setPlanningData(null); setPlanningNote(null);
+    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); })
+      .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
+      .finally(() => setPlanningLoading(false));
+    // EPC ratings
+    setEpcLoading(true); setEpcError(null); setEpcData(null);
+    fetch(`https://epc.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setEpcData(d.results ?? []); })
+      .catch(e => setEpcError(e.message ?? 'Lookup failed'))
+      .finally(() => setEpcLoading(false));
   }
 
   useEffect(() => {
@@ -247,7 +296,7 @@ export function CalculatorScreen() {
   }, [inputs.postcode]);
 
   function lookupPlanning() {
-    const raw = planningPostcode || soldPostcode;
+    const raw = planningPostcode || soldPostcode || ddPostcode;
     const pc = formatPostcode(raw);
     if (!isValidPostcode(pc)) {
       setPlanningError('Enter a valid UK postcode, e.g. SW1A 2AA');
@@ -315,6 +364,8 @@ export function CalculatorScreen() {
         netYield: results.netYield,
         stampDuty: results.stampDuty,
         monthlyMortgage: results.monthlyMortgage,
+        fiveYearTotalReturn: results.projection5yr.totalReturn,
+        floodRiskLevel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.level : undefined,
         inputs: { ...inputs },
       }];
       return next;
@@ -337,6 +388,8 @@ export function CalculatorScreen() {
       netYield: results.netYield,
       stampDuty: results.stampDuty,
       monthlyMortgage: results.monthlyMortgage,
+      fiveYearTotalReturn: results.projection5yr.totalReturn,
+      floodRiskLevel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.level : d.floodRiskLevel,
       inputs: { ...inputs },
     } : d));
     setEditingDealId(null);
@@ -414,12 +467,35 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v15</Text>
+        <Text style={styles.title}>Property Deal Calculator v17</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
         {view === 'duediligence' && (
           <View>
+            {/* Shared postcode entry — above sub-tab nav */}
+            <View style={[styles.card, { marginBottom: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}>
+              <View style={styles.soldSearchRow}>
+                <TextInput
+                  style={styles.soldPostcodeInput}
+                  value={ddPostcode}
+                  onChangeText={setDdPostcode}
+                  placeholder="e.g. SW1A 2AA"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="characters"
+                  returnKeyType="search"
+                  onSubmitEditing={lookupAllDd}
+                />
+                <TouchableOpacity
+                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading) && styles.soldSearchBtnDisabled]}
+                  onPress={lookupAllDd}
+                  disabled={soldLoading || floodLoading || planningLoading || epcLoading}
+                >
+                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading) ? '…' : 'Search'}</Text>
+                </TouchableOpacity>
+              </View>
+              {soldError && <Text style={styles.soldError}>{soldError}</Text>}
+            </View>
             {/* Sub-tab nav */}
             <View style={styles.ddTabBar}>
               <TouchableOpacity
@@ -440,32 +516,18 @@ export function CalculatorScreen() {
               >
                 <Text style={[styles.ddTabText, ddTab === 'planning' && styles.ddTabTextActive]}>Planning</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ddTab, ddTab === 'epc' && styles.ddTabActive]}
+                onPress={() => setDdTab('epc')}
+              >
+                <Text style={[styles.ddTabText, ddTab === 'epc' && styles.ddTabTextActive]}>EPC</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Sold Prices sub-tab */}
             {ddTab === 'sold' && (
               <View>
                 <View style={styles.card}>
-                  <View style={styles.soldSearchRow}>
-                    <TextInput
-                      style={styles.soldPostcodeInput}
-                      value={soldPostcode}
-                      onChangeText={setSoldPostcode}
-                      placeholder="e.g. SW1A 2AA"
-                      placeholderTextColor={colors.textMuted}
-                      autoCapitalize="characters"
-                      returnKeyType="search"
-                      onSubmitEditing={lookupSoldPrices}
-                    />
-                    <TouchableOpacity
-                      style={[styles.soldSearchBtn, soldLoading && styles.soldSearchBtnDisabled]}
-                      onPress={lookupSoldPrices}
-                      disabled={soldLoading}
-                    >
-                      <Text style={styles.soldSearchBtnText}>{soldLoading ? '…' : 'Search'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {soldError && <Text style={styles.soldError}>{soldError}</Text>}
                   {soldPrices && soldPrices.length === 0 && (
                     <Text style={styles.soldNone}>No recent sales found for this postcode.</Text>
                   )}
@@ -495,7 +557,7 @@ export function CalculatorScreen() {
             {/* Flood Risk sub-tab */}
             {ddTab === 'flood' && (
               <View style={styles.card}>
-                <Text style={styles.soldNone}>Enter a postcode in the Calculator tab to trigger flood risk lookup, or use the postcode from your Sold Prices search.</Text>
+                {!floodRisk && !floodLoading && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up flood risk.</Text>}
                 {floodLoading && !floodRisk && <Text style={styles.soldNone}>Looking up flood risk…</Text>}
                 {floodRisk && (
                   <>
@@ -521,26 +583,9 @@ export function CalculatorScreen() {
             {ddTab === 'planning' && (
               <View>
                 <View style={styles.card}>
-                  <View style={styles.soldSearchRow}>
-                    <TextInput
-                      style={styles.soldPostcodeInput}
-                      value={planningPostcode || soldPostcode}
-                      onChangeText={v => setPlanningPostcode(v)}
-                      placeholder="e.g. SW1A 2AA"
-                      placeholderTextColor={colors.textMuted}
-                      autoCapitalize="characters"
-                      returnKeyType="search"
-                      onSubmitEditing={lookupPlanning}
-                    />
-                    <TouchableOpacity
-                      style={[styles.soldSearchBtn, planningLoading && styles.soldSearchBtnDisabled]}
-                      onPress={lookupPlanning}
-                      disabled={planningLoading}
-                    >
-                      <Text style={styles.soldSearchBtnText}>{planningLoading ? '…' : 'Search'}</Text>
-                    </TouchableOpacity>
-                  </View>
                   {planningError && <Text style={styles.soldError}>{planningError}</Text>}
+                  {!planningData && !planningLoading && !planningError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up planning applications.</Text>}
+                  {planningLoading && <Text style={styles.soldNone}>Looking up planning applications…</Text>}
                   {planningNote && <Text style={styles.planningNote}>{planningNote}</Text>}
                   {planningData && planningData.length === 0 && !planningNote && (
                     <Text style={styles.soldNone}>No planning applications found for this postcode.</Text>
@@ -566,6 +611,55 @@ export function CalculatorScreen() {
                     </View>
                   )}
                   <Text style={styles.floodDisclaimer}>Source: planning.data.gov.uk — coverage varies by council. Always check the local authority planning portal for full history.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* EPC sub-tab */}
+            {ddTab === 'epc' && (
+              <View>
+                <View style={styles.card}>
+                  {epcError && <Text style={styles.soldError}>{epcError}</Text>}
+                  {!epcData && !epcLoading && !epcError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up EPC ratings.</Text>}
+                  {epcLoading && <Text style={styles.soldNone}>Looking up EPC certificates…</Text>}
+                  {epcData && epcData.length === 0 && (
+                    <Text style={styles.soldNone}>No EPC certificates found for this postcode.</Text>
+                  )}
+                  {epcData && epcData.length > 0 && (
+                    <View style={styles.soldTable}>
+                      <View style={styles.soldTableHeader}>
+                        <Text style={[{ flex: 3 }, styles.soldHeaderText]}>Address</Text>
+                        <Text style={[{ flex: 1, textAlign: 'center' }, styles.soldHeaderText]}>Rating</Text>
+                        <Text style={[{ flex: 1, textAlign: 'center' }, styles.soldHeaderText]}>Size</Text>
+                        <Text style={[{ flex: 2, textAlign: 'right' }, styles.soldHeaderText]}>Valid Until</Text>
+                      </View>
+                      {epcData.map((e, i) => {
+                        const ratingColor = e.rating === 'A' || e.rating === 'B' ? '#22c55e'
+                          : e.rating === 'C' ? '#84cc16'
+                          : e.rating === 'D' ? '#f59e0b'
+                          : e.rating === 'E' ? '#f97316'
+                          : '#ef4444';
+                        const sizeLabel = e.floorArea ? e.floorArea.replace(' square metres', 'm²') : '—';
+                        return (
+                          <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt]}>
+                            <Text style={{ flex: 3, fontSize: 11, color: colors.text }} numberOfLines={2}>{e.address}</Text>
+                            <View style={{ flex: 1, alignItems: 'center' }}>
+                              <View style={{ backgroundColor: ratingColor, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{e.rating}</Text>
+                              </View>
+                            </View>
+                            <Text style={{ flex: 1, fontSize: 11, color: colors.textMuted, textAlign: 'center' }}>{sizeLabel}</Text>
+                            <View style={{ flex: 2, alignItems: 'flex-end' }}>
+                              <Text style={{ fontSize: 11, color: e.expired ? colors.negative : colors.textMuted, textAlign: 'right' }} numberOfLines={2}>
+                                {e.validUntil}{e.expired ? '\nExpired' : ''}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      <Text style={styles.soldFootnote}>Source: GOV.UK Find an Energy Certificate</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             )}
@@ -683,12 +777,10 @@ export function CalculatorScreen() {
                           <Text style={styles.dealCardKey}>Upfront capital</Text>
                           <Text style={styles.dealCardVal}>{fmtGbp(deal.totalInvested)}</Text>
                         </View>
-                        {deal.capitalLeftIn != null && (
-                          <View style={styles.dealCardRow}>
-                            <Text style={styles.dealCardKey}>Cash left in</Text>
-                            <Text style={styles.dealCardVal}>{fmtGbp(deal.capitalLeftIn)}</Text>
-                          </View>
-                        )}
+                        <View style={styles.dealCardRow}>
+                          <Text style={styles.dealCardKey}>Cash left in</Text>
+                          <Text style={styles.dealCardVal}>{fmtGbp(deal.capitalLeftIn ?? deal.totalInvested)}</Text>
+                        </View>
                         <View style={styles.dealCardRow}>
                           <Text style={styles.dealCardKey}>Return on capital</Text>
                           <Text style={[styles.dealCardVal, { color: deal.cashOnCash >= 0 ? colors.positive : colors.negative }]}>{fmtPct(deal.cashOnCash)}</Text>
@@ -697,6 +789,20 @@ export function CalculatorScreen() {
                           <Text style={styles.dealCardKey}>Cashflow</Text>
                           <Text style={[styles.dealCardVal, { color: deal.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>{fmtGbp(deal.monthlyNetCashflow)}/mo</Text>
                         </View>
+                        {deal.fiveYearTotalReturn != null && (
+                          <View style={styles.dealCardRow}>
+                            <Text style={styles.dealCardKey}>5yr total return</Text>
+                            <Text style={[styles.dealCardVal, { color: deal.fiveYearTotalReturn >= 0 ? colors.positive : colors.negative }]}>{fmtGbp(deal.fiveYearTotalReturn)}</Text>
+                          </View>
+                        )}
+                        {deal.floodRiskLevel != null && (
+                          <View style={styles.dealCardRow}>
+                            <Text style={styles.dealCardKey}>Flood risk</Text>
+                            <Text style={[styles.dealCardVal, { color: deal.floodRiskLevel === 'low' ? colors.positive : deal.floodRiskLevel === 'medium' ? '#f59e0b' : colors.negative }]}>
+                              {deal.floodRiskLevel === 'low' ? '🟢 Low' : deal.floodRiskLevel === 'medium' ? '🟡 Medium' : '🔴 High'}
+                            </Text>
+                          </View>
+                        )}
                         <View style={styles.savedCardActions}>
                           <TouchableOpacity style={[styles.savedCardBtn, { borderColor: dealColor }]} onPress={() => loadDealForEdit(deal)}>
                             <Text style={[styles.savedCardBtnText, { color: dealColor }]}>✎ Update</Text>
@@ -736,7 +842,7 @@ export function CalculatorScreen() {
             <Text style={styles.sectionTitle}>Property Details</Text>
             <TouchableOpacity
               style={styles.floodBadge}
-              onPress={() => { const pc = formatPostcode(inputs.postcode); if (isValidPostcode(pc)) { setSoldPostcode(pc); setView('sold'); } }}
+              onPress={() => { const pc = formatPostcode(inputs.postcode); if (isValidPostcode(pc)) { setDdPostcode(pc); setSoldPostcode(pc); setView('duediligence'); } }}
               disabled={!floodRisk && !floodLoading}
             >
               {floodLoading ? (
@@ -1252,6 +1358,8 @@ export function CalculatorScreen() {
             <ResultRow label="Gross Yield" value={fmtPct(results.grossYield)} />
             <ResultRow label="Net Yield" value={fmtPct(results.netYield)} highlight={results.netYield > 4} negative={results.netYield < 0} />
             <ResultRow label="Cash-on-Cash Return" value={fmtPct(results.cashOnCash)} highlight={results.cashOnCash > 6} negative={results.cashOnCash < 0} />
+            <ResultRow label="Cash Left In" value={fmtGbp(results.capitalLeftIn ?? results.totalInvested)} highlight />
+            <ResultRow label="5yr Total Return" value={fmtGbp(results.projection5yr.totalReturn)} highlight={results.projection5yr.totalReturn > 0} negative={results.projection5yr.totalReturn < 0} />
 
             {/* Stress test */}
             <TouchableOpacity style={styles.expandRow} onPress={() => setShowStress(v => !v)}>
