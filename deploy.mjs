@@ -17,10 +17,8 @@ const AUTH_HEADER = `Authorization: Basic ${Buffer.from(`x:${PAT}`).toString('ba
 // Step 1: Fix absolute paths in dist/index.html
 const indexPath = resolve(DIST, 'index.html');
 let html = readFileSync(indexPath, 'utf8');
-// Replace absolute /_expo/ paths with relative ./_expo/ paths for GitHub Pages subdir hosting
-html = html.replace(/\/_expo\//g, './_expo/');
-// Also fix any other absolute /assets/ references
-html = html.replace(/\s(src|href)="\//g, ' $1="./');
+// Replace absolute /_expo/ paths with relative ./_expo/ — match ="/_expo/ to avoid double-converting
+html = html.replace(/="\/_expo\//g, '="./_expo/');
 writeFileSync(indexPath, html);
 console.log('✓ Fixed absolute paths in index.html');
 
