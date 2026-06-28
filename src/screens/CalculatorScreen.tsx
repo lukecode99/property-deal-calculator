@@ -645,7 +645,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v32</Text>
+        <Text style={styles.title}>Property Deal Calculator v33</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -1073,47 +1073,41 @@ export function CalculatorScreen() {
                     <View>
                       {schoolsData.map((s, i) => {
                         const typeColor = s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6';
-                        const rating = s.ofstedRating ?? 'Not inspected';
-                        const ofstedColor = rating === 'Outstanding' || rating === 'Exceptional' ? '#22c55e'
-                          : rating === 'Good' || rating === 'Strong standard' ? '#3b82f6'
-                          : rating === 'Expected standard' ? '#64748b'
-                          : rating === 'Requires Improvement' || rating === 'Needs attention' ? '#f59e0b'
-                          : rating === 'Inadequate' || rating === 'Urgent improvement' ? '#ef4444'
-                          : rating === 'Not yet inspected' || rating === 'Inspected' ? '#6b7280'
-                          : '#6b7280';
                         const isSubRating = s.ofstedFormat === 'sub-ratings';
+                        const isNotInspected = s.ofstedFormat === 'none';
+                        const rating = s.ofstedRating ?? 'Not inspected';
+                        const ofstedColor = rating === 'Outstanding' ? '#22c55e'
+                          : rating === 'Good' ? '#3b82f6'
+                          : rating === 'Requires Improvement' ? '#f59e0b'
+                          : rating === 'Inadequate' ? '#ef4444'
+                          : '#6b7280';
                         return (
-                          <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { paddingVertical: 8 }]}>
-                            <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600', marginBottom: 4 }} numberOfLines={2}>{s.name}</Text>
+                          <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { paddingVertical: 8, flexDirection: 'column', width: '100%' }]}>
+                            <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600', marginBottom: 6, flexShrink: 1 }} numberOfLines={3}>{s.name}</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                               <View style={{ backgroundColor: typeColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
                               </View>
-                              <View>
+                              {!isSubRating && (
                                 <View style={{ backgroundColor: ofstedColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
                                   <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{rating}</Text>
                                 </View>
-                                {isSubRating && (
-                                  <Text style={{ fontSize: 8, color: colors.textMuted, marginTop: 1 }}>{s.subAspect ?? 'Achievement'} (new framework)</Text>
-                                )}
-                              </View>
-                              {s.distanceKm !== null && (
-                                <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted, marginLeft: 'auto' }}>{s.distanceKm}km</Text>
+                              )}
+                              {(isSubRating || (!isNotInspected && s.reportUrl)) && (
+                                <TouchableOpacity onPress={() => Linking.openURL(s.reportUrl!)}>
+                                  <Text style={{ fontSize: 10, color: '#3b82f6', textDecorationLine: 'underline' }}>View Ofsted report →</Text>
+                                </TouchableOpacity>
                               )}
                             </View>
-                            {s.reportUrl && (
-                              <TouchableOpacity onPress={() => Linking.openURL(s.reportUrl!)} style={{ marginTop: 4 }}>
-                                <Text style={{ fontSize: 9, color: '#3b82f6', textDecorationLine: 'underline' }}>
-                                  {s.reportDate ? `View report (${s.reportDate})` : 'View report'}
-                                </Text>
-                              </TouchableOpacity>
+                            {s.distanceKm !== null && (
+                              <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted, marginTop: 4 }}>{s.distanceKm}km away</Text>
                             )}
                           </View>
                         );
                       })}
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Post-Sep 2024 schools show Achievement sub-rating under Ofsted's new framework.</Text>
+                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Post-Sep 2024 schools link directly to report — Ofsted no longer gives overall grades for state schools.</Text>
                 </View>
               </View>
             )}
