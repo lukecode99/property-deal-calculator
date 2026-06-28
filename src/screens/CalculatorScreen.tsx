@@ -225,7 +225,7 @@ export function CalculatorScreen() {
   const [hmoLoading, setHmoLoading] = useState(false);
   const [hmoError, setHmoError] = useState<string | null>(null);
 
-  type School = { name: string; type: string; distanceKm: number };
+  type School = { name: string; type: string; distanceKm: number | null; ofstedRating?: string; urn?: string };
   const [schoolsData, setSchoolsData] = useState<School[] | null>(null);
   const [schoolsLoading, setSchoolsLoading] = useState(false);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
@@ -364,22 +364,12 @@ export function CalculatorScreen() {
           })
           .catch(e => setHmoError(e.message ?? 'Article 4 lookup failed'))
           .finally(() => setHmoLoading(false));
-        // Schools via OpenStreetMap Overpass
-        const query = `[out:json];(node["amenity"="school"](around:1500,${lat},${lng});way["amenity"="school"](around:1500,${lat},${lng}););out center 15;`;
-        fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query })
+        // Schools + Ofsted ratings via Cloudflare Worker (scrapes reports.ofsted.gov.uk)
+        fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lng}&radius=2`)
           .then(r => r.json())
-          .then((osm: any) => {
-            const seen = new Set<string>();
-            const schools: School[] = (osm.elements ?? [])
-              .filter((e: any) => e.tags?.name && !seen.has(e.tags.name) && !!seen.add(e.tags.name))
-              .map((e: any) => {
-                const slat = e.lat ?? e.center?.lat ?? 0;
-                const slon = e.lon ?? e.center?.lon ?? 0;
-                return { name: e.tags.name, type: getSchoolType(e.tags), distanceKm: Math.round(haversineKm(lat, lng, slat, slon) * 10) / 10 };
-              })
-              .sort((a: School, b: School) => a.distanceKm - b.distanceKm)
-              .slice(0, 10);
-            setSchoolsData(schools);
+          .then((d: any) => {
+            if (d.error) throw new Error(d.error);
+            setSchoolsData((d.schools ?? []).slice(0, 10));
           })
           .catch(e => setSchoolsError(e.message ?? 'Schools lookup failed'))
           .finally(() => setSchoolsLoading(false));
@@ -655,7 +645,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v30</Text>
+        <Text style={styles.title}>Property Deal Calculator v31</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -1077,29 +1067,37 @@ export function CalculatorScreen() {
                   {!schoolsData && !schoolsLoading && !schoolsError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to find nearby schools.</Text>}
                   {schoolsLoading && <Text style={styles.soldNone}>Finding nearby schools…</Text>}
                   {schoolsData && schoolsData.length === 0 && (
-                    <Text style={styles.soldNone}>No schools found within 1.5km of this postcode.</Text>
+                    <Text style={styles.soldNone}>No schools found within 2km of this postcode.</Text>
                   )}
                   {schoolsData && schoolsData.length > 0 && (
                     <View>
-                      <View style={[styles.soldTableHeader, { flexDirection: 'row', marginBottom: 4 }]}>
-                        <Text style={[styles.soldHeaderText, { flex: 3 }]}>School</Text>
-                        <Text style={[styles.soldHeaderText, { flex: 1.2, textAlign: 'center' }]}>Type</Text>
-                        <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>Distance</Text>
-                      </View>
-                      {schoolsData.map((s, i) => (
-                        <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
-                          <Text style={{ flex: 3, fontSize: font.sizes.sm, color: colors.text }} numberOfLines={2}>{s.name}</Text>
-                          <View style={{ flex: 1.2, alignItems: 'center' }}>
-                            <View style={{ backgroundColor: s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
-                              <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
+                      {schoolsData.map((s, i) => {
+                        const typeColor = s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6';
+                        const ofstedColor = s.ofstedRating === 'Outstanding' ? '#22c55e'
+                          : s.ofstedRating === 'Good' ? '#3b82f6'
+                          : s.ofstedRating === 'Requires Improvement' ? '#f59e0b'
+                          : s.ofstedRating === 'Inadequate' ? '#ef4444'
+                          : '#6b7280';
+                        return (
+                          <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { paddingVertical: 8 }]}>
+                            <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600', marginBottom: 4 }} numberOfLines={2}>{s.name}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ backgroundColor: typeColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
+                              </View>
+                              <View style={{ backgroundColor: ofstedColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+                                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.ofstedRating ?? 'Not inspected'}</Text>
+                              </View>
+                              {s.distanceKm !== null && (
+                                <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted, marginLeft: 'auto' }}>{s.distanceKm}km</Text>
+                              )}
                             </View>
                           </View>
-                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>{s.distanceKm}km</Text>
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: OpenStreetMap. Schools within 1.5km, sorted by distance. For Ofsted ratings, visit reports.ofsted.gov.uk.</Text>
+                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Tap a URN at reports.ofsted.gov.uk to view the full report.</Text>
                 </View>
               </View>
             )}

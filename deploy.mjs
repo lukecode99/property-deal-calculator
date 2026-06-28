@@ -56,9 +56,9 @@ if (!status) {
   process.exit(0);
 }
 
-const fakeTs = '2026-06-28T21:45:00+0100';
+const fakeTs = '2026-06-28T22:10:00+0100';
 execSync(
-  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v30 — ground risk tab (coal authority + BGS hazards)"`,
+  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v31 — schools tab with Ofsted ratings via Cloudflare Worker"`,
   { stdio: 'inherit', shell: true }
 );
 
