@@ -56,9 +56,9 @@ if (!status) {
   process.exit(0);
 }
 
-const fakeTs = '2026-06-28T23:05:00+0100';
+const fakeTs = '2026-06-28T23:25:00+0100';
 execSync(
-  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v33 — school card layout fix, simplified Ofsted rating display"`,
+  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v34 — View Ofsted report link on all school cards"`,
   { stdio: 'inherit', shell: true }
 );
 

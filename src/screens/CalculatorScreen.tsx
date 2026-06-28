@@ -645,7 +645,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v33</Text>
+        <Text style={styles.title}>Property Deal Calculator v34</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -1093,7 +1093,7 @@ export function CalculatorScreen() {
                                   <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{rating}</Text>
                                 </View>
                               )}
-                              {(isSubRating || (!isNotInspected && s.reportUrl)) && (
+                              {s.reportUrl && (
                                 <TouchableOpacity onPress={() => Linking.openURL(s.reportUrl!)}>
                                   <Text style={{ fontSize: 10, color: '#3b82f6', textDecorationLine: 'underline' }}>View Ofsted report →</Text>
                                 </TouchableOpacity>
