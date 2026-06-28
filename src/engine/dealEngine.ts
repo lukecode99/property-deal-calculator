@@ -118,7 +118,9 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
   const mgmtFee = monthlyGrossIncome * mgmtFeePct;
   const maintenance = monthlyGrossIncome * maintPct;
   const voidAllowance = inputs.strategy === 'hmo' ? 0 : (monthlyGrossIncome * voidMonths) / 12;
-  const monthlyOpex = serviceCharge + insurance + mgmtFee + maintenance + voidAllowance + stlMonthlyCosts + hmoMonthlyCosts;
+  const gasCertMonthly = n(inputs.gasCertAnnual ?? '60') / 12;
+  const elecCertMonthly = n(inputs.elecCertFiveYear ?? '200') / 60;
+  const monthlyOpex = serviceCharge + insurance + mgmtFee + maintenance + voidAllowance + stlMonthlyCosts + hmoMonthlyCosts + gasCertMonthly + elecCertMonthly;
 
   // Mortgage — derive base value from valuation input, then apply LTV
   const depositPct = n(inputs.depositPct) / 100;
@@ -209,7 +211,7 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     const adjMgmtFee = adjIncome * mgmtFeePct;
     const adjMaintenance = adjIncome * maintPct;
     const adjVoid = (adjIncome * voidMonths) / 12;
-    const adjOpex = serviceCharge + insurance + adjMgmtFee + adjMaintenance + adjVoid + stlMonthlyCosts;
+    const adjOpex = serviceCharge + insurance + adjMgmtFee + adjMaintenance + adjVoid + stlMonthlyCosts + gasCertMonthly + elecCertMonthly;
     const yrMortgage = yr <= initialTerm ? monthlyMortgage : futureMonthlyMortgage;
     const adjNet = (adjIncome - yrMortgage - adjOpex) * 12;
     cumulativeCashflow += adjNet;

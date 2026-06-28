@@ -110,6 +110,8 @@ export interface DealInputs {
   mgmtFeePct: string;
   maintenancePct: string;
   voidMonths: string;
+  gasCertAnnual: string;
+  elecCertFiveYear: string;
 
   // Projections
   capitalGrowthPct: string;
@@ -221,6 +223,7 @@ export const DEFAULT_INPUTS: DealInputs = {
   stl_gasElectric: '', stl_internet: '', stl_additionalMaintenance: '',
   serviceCharge: '0', insurance: '800', mgmtFeePct: '10',
   maintenancePct: '5', voidMonths: '0.5',
+  gasCertAnnual: '60', elecCertFiveYear: '200',
   capitalGrowthPct: '3', annualIncomeIncreasePct: '2',
   mortgageValuation: '',
   mortgageType: 'standard',

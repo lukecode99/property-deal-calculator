@@ -142,7 +142,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -162,8 +162,9 @@ export function CalculatorScreen() {
   const [floodRisk, setFloodRisk] = useState<FloodRisk | null>(null);
   const [floodLoading, setFloodLoading] = useState(false);
 
-  type PlanningApp = { reference: string; address: string; description: string; decision: string; date: string; url: string };
+  type PlanningApp = { reference: string; address: string; description: string; status: string; type: string; date: string; decisionDate: string; url: string; distanceM: number | null };
   const [planningPostcode, setPlanningPostcode] = useState('');
+  const [planningCouncil, setPlanningCouncil] = useState('');
   const [planningData, setPlanningData] = useState<PlanningApp[] | null>(null);
   const [planningLoading, setPlanningLoading] = useState(false);
   const [planningError, setPlanningError] = useState<string | null>(null);
@@ -173,6 +174,28 @@ export function CalculatorScreen() {
   const [epcData, setEpcData] = useState<EpcResult[] | null>(null);
   const [epcLoading, setEpcLoading] = useState(false);
   const [epcError, setEpcError] = useState<string | null>(null);
+
+  type CrimeBreakdown = { category: string; label: string; count: number; perMonth: number };
+  type CrimeData = { level: string; colour: string; avgPerMonth: number; monthsAnalysed: number; breakdown: CrimeBreakdown[]; note: string | null };
+  const [crimeData, setCrimeData] = useState<CrimeData | null>(null);
+  const [crimeLoading, setCrimeLoading] = useState(false);
+  const [crimeError, setCrimeError] = useState<string | null>(null);
+
+  type TransportStop = { name: string; type: string; distanceKm: number; walkMins: number };
+  type TransportData = { stops: TransportStop[]; note: string | null };
+  const [transportData, setTransportData] = useState<TransportData | null>(null);
+  const [transportLoading, setTransportLoading] = useState(false);
+  const [transportError, setTransportError] = useState<string | null>(null);
+
+  type RentalRate = { label: string; weeklyRate: number | null; monthlyRate: number | null };
+  type OnsRent = { median: number | null; uq: number | null };
+  type OnsMedians = { area: string; rents: Record<string, OnsRent> };
+  type UKAverage = { employmentRate: number | null; unemploymentRate: number | null; inactivityRate: number | null };
+  type Employment = { area: string | null; employmentRate: number | null; unemploymentRate: number | null; inactivityRate: number | null; ukAverage?: UKAverage | null };
+  type RentalData = { brmaName: string | null; lha: Record<string, RentalRate>; onsMedians: OnsMedians | null; employment?: Employment | null };
+  const [rentalData, setRentalData] = useState<RentalData | null>(null);
+  const [rentalLoading, setRentalLoading] = useState(false);
+  const [rentalError, setRentalError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -243,10 +266,10 @@ export function CalculatorScreen() {
         .catch(() => {}).finally(() => setFloodLoading(false));
     }
     // Planning
-    setPlanningLoading(true); setPlanningError(null); setPlanningData(null); setPlanningNote(null);
+    setPlanningLoading(true); setPlanningError(null); setPlanningData(null); setPlanningNote(null); setPlanningCouncil('');
     fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
       .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); })
+      .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); setPlanningCouncil(d.council ?? ''); })
       .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
       .finally(() => setPlanningLoading(false));
     // EPC ratings
@@ -256,6 +279,27 @@ export function CalculatorScreen() {
       .then((d: any) => { if (d.error) throw new Error(d.error); setEpcData(d.results ?? []); })
       .catch(e => setEpcError(e.message ?? 'Lookup failed'))
       .finally(() => setEpcLoading(false));
+    // Crime
+    setCrimeLoading(true); setCrimeError(null); setCrimeData(null);
+    fetch(`https://crime.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setCrimeData(d); })
+      .catch(e => setCrimeError(e.message ?? 'Lookup failed'))
+      .finally(() => setCrimeLoading(false));
+    // Transport
+    setTransportLoading(true); setTransportError(null); setTransportData(null);
+    fetch(`https://transport.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setTransportData(d); })
+      .catch(e => setTransportError(e.message ?? 'Lookup failed'))
+      .finally(() => setTransportLoading(false));
+    // Rental benchmarks (LHA)
+    setRentalLoading(true); setRentalError(null); setRentalData(null);
+    fetch(`https://rental.nanoluke521.workers.dev/?v=5&postcode=${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
+      .catch(e => setRentalError(e.message ?? 'Lookup failed'))
+      .finally(() => setRentalLoading(false));
   }
 
   useEffect(() => {
@@ -307,12 +351,14 @@ export function CalculatorScreen() {
     setPlanningError(null);
     setPlanningData(null);
     setPlanningNote(null);
+    setPlanningCouncil('');
     fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
       .then(r => r.json())
       .then((d: any) => {
         if (d.error) throw new Error(d.error);
         setPlanningData(d.applications ?? []);
         setPlanningNote(d.note ?? null);
+        setPlanningCouncil(d.council ?? '');
       })
       .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
       .finally(() => setPlanningLoading(false));
@@ -467,7 +513,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v17</Text>
+        <Text style={styles.title}>Property Deal Calculator v28</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -487,42 +533,32 @@ export function CalculatorScreen() {
                   onSubmitEditing={lookupAllDd}
                 />
                 <TouchableOpacity
-                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading) && styles.soldSearchBtnDisabled]}
+                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) && styles.soldSearchBtnDisabled]}
                   onPress={lookupAllDd}
-                  disabled={soldLoading || floodLoading || planningLoading || epcLoading}
+                  disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading}
                 >
-                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading) ? '…' : 'Search'}</Text>
+                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) ? '…' : 'Search'}</Text>
                 </TouchableOpacity>
               </View>
               {soldError && <Text style={styles.soldError}>{soldError}</Text>}
             </View>
             {/* Sub-tab nav */}
-            <View style={styles.ddTabBar}>
-              <TouchableOpacity
-                style={[styles.ddTab, ddTab === 'sold' && styles.ddTabActive]}
-                onPress={() => setDdTab('sold')}
-              >
-                <Text style={[styles.ddTabText, ddTab === 'sold' && styles.ddTabTextActive]}>Sold Prices</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ddTab, ddTab === 'flood' && styles.ddTabActive]}
-                onPress={() => setDdTab('flood')}
-              >
-                <Text style={[styles.ddTabText, ddTab === 'flood' && styles.ddTabTextActive]}>Flood Risk</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ddTab, ddTab === 'planning' && styles.ddTabActive]}
-                onPress={() => setDdTab('planning')}
-              >
-                <Text style={[styles.ddTabText, ddTab === 'planning' && styles.ddTabTextActive]}>Planning</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ddTab, ddTab === 'epc' && styles.ddTabActive]}
-                onPress={() => setDdTab('epc')}
-              >
-                <Text style={[styles.ddTabText, ddTab === 'epc' && styles.ddTabTextActive]}>EPC</Text>
-              </TouchableOpacity>
-            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.ddTabBar} contentContainerStyle={styles.ddTabBarContent}>
+              {([
+                { key: 'sold', label: 'Sold' },
+                { key: 'flood', label: 'Flood' },
+                { key: 'planning', label: 'Planning' },
+                { key: 'epc', label: 'EPC' },
+                { key: 'crime', label: 'Crime' },
+                { key: 'transport', label: 'Transport' },
+                { key: 'rental', label: 'Rental' },
+                { key: 'employment', label: 'Employment' },
+              ] as { key: typeof ddTab; label: string }[]).map(tab => (
+                <TouchableOpacity key={tab.key} style={[styles.ddTab, ddTab === tab.key && styles.ddTabActive]} onPress={() => setDdTab(tab.key)}>
+                  <Text style={[styles.ddTabText, ddTab === tab.key && styles.ddTabTextActive]}>{tab.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
             {/* Sold Prices sub-tab */}
             {ddTab === 'sold' && (
@@ -588,29 +624,38 @@ export function CalculatorScreen() {
                   {planningLoading && <Text style={styles.soldNone}>Looking up planning applications…</Text>}
                   {planningNote && <Text style={styles.planningNote}>{planningNote}</Text>}
                   {planningData && planningData.length === 0 && !planningNote && (
-                    <Text style={styles.soldNone}>No planning applications found for this postcode.</Text>
+                    <Text style={styles.soldNone}>No planning applications found within 500m in the last 3 years.</Text>
                   )}
                   {planningData && planningData.length > 0 && (
                     <View style={styles.planningList}>
-                      {planningData.map((app, i) => (
-                        <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
-                          <View style={styles.planningRowTop}>
-                            <Text style={styles.planningRef} numberOfLines={1}>{app.reference || '—'}</Text>
-                            {app.decision ? (
-                              <Text style={[styles.planningDecision, {
-                                color: app.decision.toLowerCase().includes('grant') ? colors.positive :
-                                       app.decision.toLowerCase().includes('refus') ? colors.negative : colors.textMuted
-                              }]}>{app.decision}</Text>
-                            ) : null}
+                      {planningCouncil ? <Text style={[styles.planningDate, { marginBottom: 8, color: colors.textMuted }]}>Council: {planningCouncil} · {planningData.length} applications within 500m (last 3 yrs)</Text> : null}
+                      {planningData.map((app, i) => {
+                        const statusLower = (app.status || '').toLowerCase();
+                        const statusColor = statusLower === 'permitted' || statusLower === 'conditions'
+                          ? colors.positive
+                          : statusLower === 'rejected'
+                          ? colors.negative
+                          : '#f59e0b';
+                        return (
+                          <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
+                            <View style={styles.planningRowTop}>
+                              <Text style={styles.planningRef} numberOfLines={1}>{app.type || app.reference || '—'}</Text>
+                              {app.status ? (
+                                <Text style={[styles.planningDecision, { color: statusColor }]}>{app.status}</Text>
+                              ) : null}
+                            </View>
+                            {app.address ? <Text style={styles.planningAddress} numberOfLines={2}>{app.address}</Text> : null}
+                            {app.description ? <Text style={styles.planningDesc} numberOfLines={3}>{app.description}</Text> : null}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+                              {app.date ? <Text style={styles.planningDate}>{new Date(app.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text> : null}
+                              {app.distanceM != null ? <Text style={styles.planningDate}>{app.distanceM}m away</Text> : null}
+                            </View>
                           </View>
-                          {app.address ? <Text style={styles.planningAddress} numberOfLines={2}>{app.address}</Text> : null}
-                          {app.description ? <Text style={styles.planningDesc} numberOfLines={3}>{app.description}</Text> : null}
-                          {app.date ? <Text style={styles.planningDate}>{new Date(app.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text> : null}
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: planning.data.gov.uk — coverage varies by council. Always check the local authority planning portal for full history.</Text>
+                  <Text style={styles.floodDisclaimer}>Source: planit.org.uk — aggregated from council planning portals. Check your local authority portal for full history.</Text>
                 </View>
               </View>
             )}
@@ -660,6 +705,183 @@ export function CalculatorScreen() {
                       <Text style={styles.soldFootnote}>Source: GOV.UK Find an Energy Certificate</Text>
                     </View>
                   )}
+                </View>
+              </View>
+            )}
+
+            {/* Crime sub-tab */}
+            {ddTab === 'crime' && (
+              <View>
+                <View style={styles.card}>
+                  {crimeError && <Text style={styles.soldError}>{crimeError}</Text>}
+                  {!crimeData && !crimeLoading && !crimeError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up local crime data.</Text>}
+                  {crimeLoading && <Text style={styles.soldNone}>Looking up crime data…</Text>}
+                  {crimeData?.note && <Text style={styles.planningNote}>{crimeData.note}</Text>}
+                  {crimeData && !crimeData.note && (
+                    <View>
+                      <View style={[styles.floodLevelRow]}>
+                        <Text style={styles.floodLevelIcon}>
+                          {crimeData.colour === 'low' ? '🟢' : crimeData.colour === 'medium' ? '🟡' : '🔴'}
+                        </Text>
+                        <View>
+                          <Text style={styles.floodLevelLabel}>{crimeData.level} Crime Area</Text>
+                          <Text style={styles.floodLevelSub}>{crimeData.avgPerMonth} crimes/month avg · {crimeData.monthsAnalysed} months of data</Text>
+                        </View>
+                      </View>
+                      <View style={{ marginTop: 8 }}>
+                        {crimeData.breakdown.map((b, i) => (
+                          <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                            <Text style={{ fontSize: font.sizes.sm, color: colors.text, flex: 1 }}>{b.label}</Text>
+                            <Text style={{ fontSize: font.sizes.sm, color: colors.textMuted, fontWeight: '600' }}>{b.perMonth}/mo</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: data.police.uk (UK street-level crime). Crimes are averaged over the last 7 months at the nearest reporting location.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Transport sub-tab */}
+            {ddTab === 'transport' && (
+              <View>
+                <View style={styles.card}>
+                  {transportError && <Text style={styles.soldError}>{transportError}</Text>}
+                  {!transportData && !transportLoading && !transportError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up nearby stations.</Text>}
+                  {transportLoading && <Text style={styles.soldNone}>Looking up transport links…</Text>}
+                  {transportData?.note && <Text style={styles.planningNote}>{transportData.note}</Text>}
+                  {transportData && transportData.stops.length > 0 && (
+                    <View>
+                      {transportData.stops.map((s, i) => {
+                        const typeColor = s.type === 'Tube/Metro' ? '#0019a8'
+                          : s.type === 'Tram' ? '#748f20'
+                          : s.type === 'Bus' ? '#e1251b'
+                          : '#1c3c78';
+                        return (
+                          <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+                            <View style={{ backgroundColor: typeColor, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, minWidth: 52, alignItems: 'center' }}>
+                              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{s.type}</Text>
+                            </View>
+                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>{s.name}</Text>
+                            <Text style={{ fontSize: font.sizes.sm, color: colors.textMuted }}>{s.distanceKm}km · {s.walkMins}min</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: OpenStreetMap via Overpass API. Shows stations, tram stops and bus stations within 2km. Walk times are estimates.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Rental Benchmarks sub-tab */}
+            {ddTab === 'rental' && (
+              <View>
+                <View style={styles.card}>
+                  {rentalError && <Text style={styles.soldError}>{rentalError}</Text>}
+                  {!rentalData && !rentalLoading && !rentalError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up rental benchmarks.</Text>}
+                  {rentalLoading && <Text style={styles.soldNone}>Looking up rental rates…</Text>}
+                  {rentalData && (
+                    <View>
+                      {/* Header info */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+                        {rentalData.brmaName && (
+                          <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted }}>BRMA: {rentalData.brmaName}</Text>
+                        )}
+                        {rentalData.onsMedians?.area && (
+                          <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted }}>Council: {rentalData.onsMedians.area}</Text>
+                        )}
+                      </View>
+                      {/* Column headers */}
+                      {rentalData.lha && (
+                      <View style={[styles.soldTableHeader, { flexDirection: 'row', paddingBottom: 6, marginBottom: 4 }]}>
+                        <Text style={[styles.soldHeaderText, { flex: 1.8 }]}>Bedrooms</Text>
+                        <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>LHA</Text>
+                        <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>Median</Text>
+                        <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>75th Percentile</Text>
+                      </View>
+                      )}
+                      {rentalData.lha && Object.entries(rentalData.lha).map(([key, rate], i) => {
+                        const ons = rentalData.onsMedians?.rents?.[key];
+                        return (
+                          <View key={key} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                            <Text style={{ flex: 1.8, fontSize: font.sizes.sm, color: colors.text }}>{rate.label}</Text>
+                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>
+                              {rate.monthlyRate != null ? `£${rate.monthlyRate.toFixed(0)}` : '—'}
+                            </Text>
+                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: ons?.median != null ? colors.accent : colors.textMuted, textAlign: 'right', fontWeight: ons?.median != null ? '700' : '400' }}>
+                              {ons?.median != null ? `£${ons.median}` : '—'}
+                            </Text>
+                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: ons?.uq != null ? colors.text : colors.textMuted, textAlign: 'right' }}>
+                              {ons?.uq != null ? `£${ons.uq}` : '—'}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                      {!rentalData.onsMedians && (
+                        <Text style={[styles.planningNote, { marginTop: spacing.sm }]}>Market median not available for this area (ONS data suppressed for small samples).</Text>
+                      )}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>LHA = 30th pct (VOA, live). Median = 50th pct. 75th Percentile = upper quartile. ONS PRMS Oct 2022–Sep 2023 — current rents likely higher. All monthly.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Employment sub-tab */}
+            {ddTab === 'employment' && (
+              <View>
+                <View style={styles.card}>
+                  {!rentalData && !rentalLoading && !rentalError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up employment data.</Text>}
+                  {rentalLoading && <Text style={styles.soldNone}>Looking up employment data…</Text>}
+                  {rentalError && <Text style={styles.soldError}>{rentalError}</Text>}
+                  {rentalData && !rentalData.employment && (
+                    <Text style={styles.soldNone}>Employment data not available for this area.</Text>
+                  )}
+                  {rentalData?.employment && (() => {
+                    const emp = rentalData.employment!;
+                    const uk = emp.ukAverage;
+                    const rows = [
+                      { label: 'Employment rate', local: emp.employmentRate, uk: uk?.employmentRate ?? null, higherIsBetter: true },
+                      { label: 'Unemployment rate', local: emp.unemploymentRate, uk: uk?.unemploymentRate ?? null, higherIsBetter: false },
+                      { label: 'Economic inactivity', local: emp.inactivityRate, uk: uk?.inactivityRate ?? null, higherIsBetter: false },
+                    ];
+                    return (
+                      <View>
+                        <Text style={{ fontSize: font.sizes.sm, color: colors.textMuted, marginBottom: spacing.sm }}>
+                          Labour market — {emp.area ?? 'Local Authority'} vs UK (ages 16–64, ONS APS)
+                        </Text>
+                        <View style={[styles.soldTableHeader, { flexDirection: 'row', paddingBottom: 6, marginBottom: 4 }]}>
+                          <Text style={[styles.soldHeaderText, { flex: 2 }]}>Indicator</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>Local</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>UK avg</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>vs UK</Text>
+                        </View>
+                        {rows.map((row, i) => {
+                          const diff = row.local != null && row.uk != null ? row.local - row.uk : null;
+                          const better = diff != null ? (row.higherIsBetter ? diff > 0 : diff < 0) : null;
+                          const diffColor = better === true ? '#22c55e' : better === false ? '#ef4444' : colors.textMuted;
+                          const diffStr = diff != null ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%` : '—';
+                          return (
+                            <View key={row.label} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                              <Text style={{ flex: 2, fontSize: font.sizes.sm, color: colors.text }}>{row.label}</Text>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.accent, textAlign: 'right', fontWeight: '700' }}>
+                                {row.local != null ? `${row.local.toFixed(1)}%` : '—'}
+                              </Text>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>
+                                {row.uk != null ? `${row.uk.toFixed(1)}%` : '—'}
+                              </Text>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: diffColor, textAlign: 'right', fontWeight: '700' }}>
+                                {diffStr}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                        <Text style={[styles.floodDisclaimer, { marginTop: spacing.sm }]}>vs UK = difference vs UK average. Green = stronger than UK. Red = weaker. Higher employment and lower unemployment/inactivity signal stronger rental demand.</Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}
@@ -1204,6 +1426,8 @@ export function CalculatorScreen() {
           <InputField label="Buildings & Landlord Insurance (annual)" value={inputs.insurance} onChangeText={set('insurance')} prefix="£" placeholder="800" />
           <InputField label="Management Fee" value={inputs.mgmtFeePct} onChangeText={set('mgmtFeePct')} suffix="%" placeholder="10" hint="% of rent — set 0 if self-managing" />
           <InputField label="Maintenance Reserve" value={inputs.maintenancePct} onChangeText={set('maintenancePct')} suffix="%" placeholder="5" hint="% of rent set aside for repairs" />
+          <InputField label="Gas Safety Cert (annual)" value={inputs.gasCertAnnual} onChangeText={set('gasCertAnnual')} prefix="£" placeholder="60" hint="CP12 — required every year" />
+          <InputField label="Electrical Safety Cert (5-yearly)" value={inputs.elecCertFiveYear} onChangeText={set('elecCertFiveYear')} prefix="£" placeholder="200" hint="EICR — cost spread over 5 years" />
           {inputs.strategy !== 'hmo' && (
             <InputField label="Void Allowance (months/yr)" value={inputs.voidMonths} onChangeText={set('voidMonths')} placeholder="0.5" hint="Average empty months per year" />
           )}
@@ -1464,15 +1688,14 @@ const styles = StyleSheet.create({
   guidePillVal: { color: colors.primary, fontSize: font.sizes.sm, fontWeight: '700' },
 
   ddTabBar: {
-    flexDirection: 'row',
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: 4,
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  ddTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: radius.sm },
+  ddTabBarContent: { flexDirection: 'row', padding: 4, gap: 2 },
+  ddTab: { paddingVertical: 8, paddingHorizontal: 14, alignItems: 'center', borderRadius: radius.sm },
   ddTabActive: { backgroundColor: colors.primary },
   ddTabText: { fontSize: font.sizes.sm, fontWeight: '600', color: colors.textSecondary },
   ddTabTextActive: { color: '#fff' },
