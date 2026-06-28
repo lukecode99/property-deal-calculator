@@ -85,6 +85,28 @@ function sumItems(items: CustomItem[]): number {
   return items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
 }
 
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getSchoolType(tags: Record<string, string>): string {
+  const s = tags.school || '';
+  if (s === 'primary') return 'Primary';
+  if (s === 'secondary') return 'Secondary';
+  if (s === 'sixth_form' || s === 'college') return 'Sixth Form';
+  if (s === 'special') return 'Special';
+  const isced = tags['isced:level'] || '';
+  if (isced.includes('0') || isced.includes('1')) return 'Primary';
+  if (isced.includes('2') || isced.includes('3')) return 'Secondary';
+  return 'School';
+}
+
+const UK_HPI: Record<number, number> = { 2019: 234000, 2020: 250000, 2021: 274000, 2022: 293000, 2023: 285000, 2024: 290000 };
+
 function CustomItemRows({
   items,
   onChange,
@@ -142,7 +164,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'hmo' | 'schools'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -196,6 +218,17 @@ export function CalculatorScreen() {
   const [rentalData, setRentalData] = useState<RentalData | null>(null);
   const [rentalLoading, setRentalLoading] = useState(false);
   const [rentalError, setRentalError] = useState<string | null>(null);
+
+  type Article4Area = { name: string; startDate: string };
+  type HmoData = { isArticle4: boolean; areas: Article4Area[]; council: string | null };
+  const [hmoData, setHmoData] = useState<HmoData | null>(null);
+  const [hmoLoading, setHmoLoading] = useState(false);
+  const [hmoError, setHmoError] = useState<string | null>(null);
+
+  type School = { name: string; type: string; distanceKm: number };
+  const [schoolsData, setSchoolsData] = useState<School[] | null>(null);
+  const [schoolsLoading, setSchoolsLoading] = useState(false);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -300,6 +333,53 @@ export function CalculatorScreen() {
       .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
       .catch(e => setRentalError(e.message ?? 'Lookup failed'))
       .finally(() => setRentalLoading(false));
+    // HMO Article 4 + Schools — both require geocoding
+    setHmoLoading(true); setHmoError(null); setHmoData(null);
+    setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then(async (geo: any) => {
+        if (!geo.result) throw new Error('Postcode geocoding failed');
+        const lat: number = geo.result.latitude;
+        const lng: number = geo.result.longitude;
+        const council: string | null = geo.result.admin_district ?? null;
+        // Article 4 Direction
+        fetch(`https://www.planning.data.gov.uk/entity.json?dataset=article-4-direction-area&entries=current&geometry=POINT(${lng}+${lat})&geometry_relation=intersects&limit=20`)
+          .then(r => r.json())
+          .then((a4: any) => {
+            const entities: any[] = a4.entities ?? [];
+            setHmoData({
+              isArticle4: entities.length > 0,
+              areas: entities.map((e: any) => ({ name: e.name || e['article-4-direction'] || 'Unknown', startDate: e['start-date'] || '' })),
+              council,
+            });
+          })
+          .catch(e => setHmoError(e.message ?? 'Article 4 lookup failed'))
+          .finally(() => setHmoLoading(false));
+        // Schools via OpenStreetMap Overpass
+        const query = `[out:json];(node["amenity"="school"](around:1500,${lat},${lng});way["amenity"="school"](around:1500,${lat},${lng}););out center 15;`;
+        fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query })
+          .then(r => r.json())
+          .then((osm: any) => {
+            const seen = new Set<string>();
+            const schools: School[] = (osm.elements ?? [])
+              .filter((e: any) => e.tags?.name && !seen.has(e.tags.name) && !!seen.add(e.tags.name))
+              .map((e: any) => {
+                const slat = e.lat ?? e.center?.lat ?? 0;
+                const slon = e.lon ?? e.center?.lon ?? 0;
+                return { name: e.tags.name, type: getSchoolType(e.tags), distanceKm: Math.round(haversineKm(lat, lng, slat, slon) * 10) / 10 };
+              })
+              .sort((a: School, b: School) => a.distanceKm - b.distanceKm)
+              .slice(0, 10);
+            setSchoolsData(schools);
+          })
+          .catch(e => setSchoolsError(e.message ?? 'Schools lookup failed'))
+          .finally(() => setSchoolsLoading(false));
+      })
+      .catch(e => {
+        setHmoError(e.message ?? 'Geocoding failed'); setHmoLoading(false);
+        setSchoolsError(e.message ?? 'Geocoding failed'); setSchoolsLoading(false);
+      });
   }
 
   useEffect(() => {
@@ -513,7 +593,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v28</Text>
+        <Text style={styles.title}>Property Deal Calculator v29</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -533,11 +613,11 @@ export function CalculatorScreen() {
                   onSubmitEditing={lookupAllDd}
                 />
                 <TouchableOpacity
-                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) && styles.soldSearchBtnDisabled]}
+                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading) && styles.soldSearchBtnDisabled]}
                   onPress={lookupAllDd}
-                  disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading}
+                  disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading}
                 >
-                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) ? '…' : 'Search'}</Text>
+                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading) ? '…' : 'Search'}</Text>
                 </TouchableOpacity>
               </View>
               {soldError && <Text style={styles.soldError}>{soldError}</Text>}
@@ -553,6 +633,8 @@ export function CalculatorScreen() {
                 { key: 'transport', label: 'Transport' },
                 { key: 'rental', label: 'Rental' },
                 { key: 'employment', label: 'Employment' },
+                { key: 'hmo', label: 'HMO' },
+                { key: 'schools', label: 'Schools' },
               ] as { key: typeof ddTab; label: string }[]).map(tab => (
                 <TouchableOpacity key={tab.key} style={[styles.ddTab, ddTab === tab.key && styles.ddTabActive]} onPress={() => setDdTab(tab.key)}>
                   <Text style={[styles.ddTabText, ddTab === tab.key && styles.ddTabTextActive]}>{tab.label}</Text>
@@ -586,6 +668,52 @@ export function CalculatorScreen() {
                       <Text style={styles.soldFootnote}>* New build   ·   Source: HM Land Registry</Text>
                     </View>
                   )}
+                  {soldPrices && soldPrices.length > 0 && (() => {
+                    const byYear: Record<number, number[]> = {};
+                    for (const s of soldPrices) {
+                      const yr = s.date ? new Date(s.date).getFullYear() : 0;
+                      if (yr > 2000) { (byYear[yr] = byYear[yr] ?? []).push(s.price); }
+                    }
+                    const rows = Object.entries(byYear)
+                      .map(([yr, prices]) => {
+                        const sorted = [...prices].sort((a, b) => a - b);
+                        const mid = Math.floor(sorted.length / 2);
+                        const median = sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+                        return { year: Number(yr), median, count: prices.length };
+                      })
+                      .sort((a, b) => a.year - b.year);
+                    if (rows.length < 2) return null;
+                    return (
+                      <View style={{ marginTop: spacing.md }}>
+                        <Text style={[styles.soldHeaderText, { marginBottom: spacing.xs }]}>Price Trend by Year</Text>
+                        <View style={[styles.soldTableHeader, { flexDirection: 'row' }]}>
+                          <Text style={[styles.soldHeaderText, { flex: 1 }]}>Year</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1.5, textAlign: 'right' }]}>Local median</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>YoY</Text>
+                          <Text style={[styles.soldHeaderText, { flex: 1.5, textAlign: 'right' }]}>UK avg</Text>
+                        </View>
+                        {rows.map((row, i) => {
+                          const prev = rows[i - 1];
+                          const yoy = prev ? ((row.median - prev.median) / prev.median) * 100 : null;
+                          const ukAvg = UK_HPI[row.year] ?? null;
+                          const yoyColor = yoy == null ? colors.textMuted : yoy >= 0 ? '#22c55e' : '#ef4444';
+                          return (
+                            <View key={row.year} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>{row.year} ({row.count})</Text>
+                              <Text style={{ flex: 1.5, fontSize: font.sizes.sm, color: colors.accent, textAlign: 'right', fontWeight: '700' }}>£{row.median.toLocaleString('en-GB')}</Text>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: yoyColor, textAlign: 'right', fontWeight: '700' }}>
+                                {yoy != null ? `${yoy >= 0 ? '+' : ''}${yoy.toFixed(1)}%` : '—'}
+                              </Text>
+                              <Text style={{ flex: 1.5, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>
+                                {ukAvg ? `£${(ukAvg / 1000).toFixed(0)}k` : '—'}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                        <Text style={styles.soldFootnote}>Local = median of sales in this postcode. UK avg = England & Wales national average (Land Registry). YoY = year-on-year change.</Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}
@@ -825,6 +953,90 @@ export function CalculatorScreen() {
                     </View>
                   )}
                   <Text style={styles.floodDisclaimer}>LHA = 30th pct (VOA, live). Median = 50th pct. 75th Percentile = upper quartile. ONS PRMS Oct 2022–Sep 2023 — current rents likely higher. All monthly.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* HMO / Article 4 sub-tab */}
+            {ddTab === 'hmo' && (
+              <View>
+                <View style={styles.card}>
+                  {hmoError && <Text style={styles.soldError}>{hmoError}</Text>}
+                  {!hmoData && !hmoLoading && !hmoError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to check Article 4 Direction status.</Text>}
+                  {hmoLoading && <Text style={styles.soldNone}>Checking Article 4 Direction areas…</Text>}
+                  {hmoData && (
+                    <View>
+                      <View style={[styles.floodLevelRow, { marginBottom: spacing.sm }]}>
+                        <Text style={styles.floodLevelIcon}>{hmoData.isArticle4 ? '🔴' : '🟢'}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.floodLevelLabel}>
+                            {hmoData.isArticle4 ? 'Article 4 Direction in effect' : 'No Article 4 Direction found'}
+                          </Text>
+                          {hmoData.council && <Text style={styles.floodLevelSub}>Council: {hmoData.council}</Text>}
+                        </View>
+                      </View>
+                      {hmoData.isArticle4 && hmoData.areas.length > 0 && (
+                        <View style={{ marginBottom: spacing.sm }}>
+                          {hmoData.areas.map((a, i) => (
+                            <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
+                              <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600' }}>{a.name}</Text>
+                              {a.startDate ? <Text style={styles.planningDate}>In force since {a.startDate}</Text> : null}
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {hmoData.isArticle4 ? (
+                        <Text style={styles.planningNote}>
+                          ⚠️ Article 4 Direction removes Permitted Development Rights in this area. Converting a C3 dwelling to a C4 HMO (3–6 occupants) requires full planning permission. Check with {hmoData.council ?? 'the local authority'} before purchasing.
+                        </Text>
+                      ) : (
+                        <Text style={styles.planningNote}>
+                          ✓ No Article 4 Direction detected at this postcode. Standard Permitted Development Rights apply — small HMOs (C4, 3–6 occupants) may not require planning permission, but always verify with the local authority.
+                        </Text>
+                      )}
+                      {hmoData.council && (
+                        <Text style={[styles.floodDisclaimer, { marginTop: spacing.xs }]}>
+                          Search HMO licensing for {hmoData.council} at your local authority website or gov.uk.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: planning.data.gov.uk Article 4 Direction Areas dataset. For HMO licensing, contact the local authority directly.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Schools sub-tab */}
+            {ddTab === 'schools' && (
+              <View>
+                <View style={styles.card}>
+                  {schoolsError && <Text style={styles.soldError}>{schoolsError}</Text>}
+                  {!schoolsData && !schoolsLoading && !schoolsError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to find nearby schools.</Text>}
+                  {schoolsLoading && <Text style={styles.soldNone}>Finding nearby schools…</Text>}
+                  {schoolsData && schoolsData.length === 0 && (
+                    <Text style={styles.soldNone}>No schools found within 1.5km of this postcode.</Text>
+                  )}
+                  {schoolsData && schoolsData.length > 0 && (
+                    <View>
+                      <View style={[styles.soldTableHeader, { flexDirection: 'row', marginBottom: 4 }]}>
+                        <Text style={[styles.soldHeaderText, { flex: 3 }]}>School</Text>
+                        <Text style={[styles.soldHeaderText, { flex: 1.2, textAlign: 'center' }]}>Type</Text>
+                        <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>Distance</Text>
+                      </View>
+                      {schoolsData.map((s, i) => (
+                        <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                          <Text style={{ flex: 3, fontSize: font.sizes.sm, color: colors.text }} numberOfLines={2}>{s.name}</Text>
+                          <View style={{ flex: 1.2, alignItems: 'center' }}>
+                            <View style={{ backgroundColor: s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2 }}>
+                              <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
+                            </View>
+                          </View>
+                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>{s.distanceKm}km</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: OpenStreetMap. Schools within 1.5km, sorted by distance. For Ofsted ratings, visit reports.ofsted.gov.uk.</Text>
                 </View>
               </View>
             )}
