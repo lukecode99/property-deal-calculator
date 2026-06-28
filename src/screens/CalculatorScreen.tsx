@@ -645,7 +645,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v34</Text>
+        <Text style={styles.title}>Property Deal Calculator v35</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -1461,7 +1461,7 @@ export function CalculatorScreen() {
         {/* Ownership toggle */}
         <View style={styles.card}>
           <View style={styles.toggleRow}>
-            <View>
+            <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={styles.label}>Ownership Structure</Text>
               <Text style={styles.hint}>Affects Section 24 tax treatment</Text>
             </View>
