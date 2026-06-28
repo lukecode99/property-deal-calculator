@@ -164,7 +164,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'hmo' | 'schools'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'hmo' | 'schools' | 'groundrisk'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -229,6 +229,14 @@ export function CalculatorScreen() {
   const [schoolsData, setSchoolsData] = useState<School[] | null>(null);
   const [schoolsLoading, setSchoolsLoading] = useState(false);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
+
+  type GroundRiskData = {
+    coal: { highRisk: boolean; surfaceMining: boolean; coalResource: boolean; reportingArea: boolean };
+    hazards: { landslideFound: boolean; surfaceGeology: string | null };
+  };
+  const [groundRiskData, setGroundRiskData] = useState<GroundRiskData | null>(null);
+  const [groundRiskLoading, setGroundRiskLoading] = useState(false);
+  const [groundRiskError, setGroundRiskError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -380,6 +388,60 @@ export function CalculatorScreen() {
         setHmoError(e.message ?? 'Geocoding failed'); setHmoLoading(false);
         setSchoolsError(e.message ?? 'Geocoding failed'); setSchoolsLoading(false);
       });
+    // Ground Risk — Coal Authority WMS + BGS hazards (uses geocoded lat/lng from postcodes.io)
+    setGroundRiskLoading(true); setGroundRiskError(null); setGroundRiskData(null);
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then(async (geo: any) => {
+        if (!geo.result) throw new Error('Postcode not found');
+        const lat: number = geo.result.latitude;
+        const lng: number = geo.result.longitude;
+        const d = 0.01;
+        const bbox = `${lng - d},${lat - d},${lng + d},${lat + d}`;
+        const wmsBase = 'https://map.bgs.ac.uk/arcgis/services/CoalAuthority/coalauthority_planning_policy_constraints/MapServer/WMSServer';
+        const bgsHazBase = 'https://map.bgs.ac.uk/arcgis/services/GeoIndex_Onshore/hazards/MapServer/WMSServer';
+        const bgsEngBase = 'https://map.bgs.ac.uk/arcgis/services/EngineeringWebGIS/EngineeringWebGIS/MapServer/WMSServer';
+        function wmsUrl(base: string, layer: string) {
+          return `${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=${encodeURIComponent(layer)}&QUERY_LAYERS=${encodeURIComponent(layer)}&BBOX=${bbox}&SRS=EPSG:4326&WIDTH=101&HEIGHT=101&X=50&Y=50&INFO_FORMAT=text/plain`;
+        }
+        function wmsHit(text: string): boolean {
+          return !text.includes('No features found') && text.trim().length > 0;
+        }
+        const [highRiskTxt, surfMineTxt, coalResTxt, reportTxt, landslideTxt, supGeolTxt] = await Promise.all([
+          fetch(wmsUrl(wmsBase, 'Development.High.Risk.Area')).then(r => r.text()).catch(() => ''),
+          fetch(wmsUrl(wmsBase, 'Surface.Mining.Past.and.Current')).then(r => r.text()).catch(() => ''),
+          fetch(wmsUrl(wmsBase, 'Surface.Coal.Resource.Areas')).then(r => r.text()).catch(() => ''),
+          fetch(wmsUrl(wmsBase, 'Coal.Mining.Reporting.Area')).then(r => r.text()).catch(() => ''),
+          fetch(wmsUrl(bgsHazBase, 'Landslides')).then(r => r.text()).catch(() => ''),
+          fetch(wmsUrl(bgsEngBase, '_:1M_Superficial_Engineering_Geology38490')).then(r => r.text()).catch(() => ''),
+        ]);
+        let surfaceGeology: string | null = null;
+        if (supGeolTxt && !supGeolTxt.includes('No features found')) {
+          const match = supGeolTxt.match(/ENG_DESC[^;]*;([^;]+);/);
+          if (!match) {
+            const parts = supGeolTxt.split(';');
+            const hdrIdx = parts.findIndex(p => p.includes('ENG_DESC'));
+            if (hdrIdx >= 0 && parts.length > hdrIdx + 4) surfaceGeology = parts[hdrIdx + 4]?.trim() || null;
+          } else {
+            surfaceGeology = match[1]?.trim() || null;
+          }
+          if (!surfaceGeology) {
+            const lines = supGeolTxt.split('\n').filter(l => l.trim());
+            if (lines.length >= 2) {
+              const hdr = lines[0].split(';').map((h: string) => h.trim());
+              const vals = lines[1].split(';').map((v: string) => v.trim());
+              const idx = hdr.indexOf('ENG_DESC');
+              if (idx >= 0 && vals[idx]) surfaceGeology = vals[idx];
+            }
+          }
+        }
+        setGroundRiskData({
+          coal: { highRisk: wmsHit(highRiskTxt), surfaceMining: wmsHit(surfMineTxt), coalResource: wmsHit(coalResTxt), reportingArea: wmsHit(reportTxt) },
+          hazards: { landslideFound: wmsHit(landslideTxt), surfaceGeology },
+        });
+      })
+      .catch(e => setGroundRiskError(e.message ?? 'Ground risk lookup failed'))
+      .finally(() => setGroundRiskLoading(false));
   }
 
   useEffect(() => {
@@ -593,7 +655,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v29</Text>
+        <Text style={styles.title}>Property Deal Calculator v30</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -635,6 +697,7 @@ export function CalculatorScreen() {
                 { key: 'employment', label: 'Employment' },
                 { key: 'hmo', label: 'HMO' },
                 { key: 'schools', label: 'Schools' },
+                { key: 'groundrisk', label: 'Ground Risk' },
               ] as { key: typeof ddTab; label: string }[]).map(tab => (
                 <TouchableOpacity key={tab.key} style={[styles.ddTab, ddTab === tab.key && styles.ddTabActive]} onPress={() => setDdTab(tab.key)}>
                   <Text style={[styles.ddTabText, ddTab === tab.key && styles.ddTabTextActive]}>{tab.label}</Text>
@@ -1037,6 +1100,68 @@ export function CalculatorScreen() {
                     </View>
                   )}
                   <Text style={styles.floodDisclaimer}>Source: OpenStreetMap. Schools within 1.5km, sorted by distance. For Ofsted ratings, visit reports.ofsted.gov.uk.</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Ground Risk sub-tab */}
+            {ddTab === 'groundrisk' && (
+              <View>
+                <View style={styles.card}>
+                  {groundRiskError && <Text style={styles.soldError}>{groundRiskError}</Text>}
+                  {!groundRiskData && !groundRiskLoading && !groundRiskError && (
+                    <Text style={styles.soldNone}>Enter a postcode above and tap Search to check ground risk.</Text>
+                  )}
+                  {groundRiskLoading && <Text style={styles.soldNone}>Checking coal and ground risk data…</Text>}
+                  {groundRiskData && (() => {
+                    const { coal, hazards } = groundRiskData;
+                    const isRedAlert = coal.highRisk || coal.surfaceMining;
+                    const isAmber = coal.coalResource || coal.reportingArea || hazards.landslideFound;
+                    const ragBg = isRedAlert ? '#ef4444' : isAmber ? '#f59e0b' : '#22c55e';
+                    const ragLabel = isRedAlert ? 'HIGH RISK' : isAmber ? 'MODERATE RISK' : 'LOW RISK';
+                    const ragSub = isRedAlert
+                      ? 'Coal mining high-risk area or surface mining present — specialist survey essential before purchase.'
+                      : isAmber
+                      ? 'Coal resource area, reporting area, or ground hazard noted — check coal authority and specialist report.'
+                      : 'No significant coal or ground risk identified at this postcode.';
+                    return (
+                      <View>
+                        <View style={{ backgroundColor: ragBg, borderRadius: 8, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: font.sizes.md }}>{ragLabel}</Text>
+                          <Text style={{ color: '#fff', fontSize: font.sizes.sm, textAlign: 'center', marginTop: 4 }}>{ragSub}</Text>
+                        </View>
+                        <Text style={{ fontSize: font.sizes.sm, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Coal Mining Risk (Coal Authority)</Text>
+                        {[
+                          { label: 'Development High Risk Area', value: coal.highRisk, severe: true },
+                          { label: 'Surface Mining (Past/Current)', value: coal.surfaceMining, severe: true },
+                          { label: 'Coal Resource Area', value: coal.coalResource, severe: false },
+                          { label: 'Coal Mining Reporting Area', value: coal.reportingArea, severe: false },
+                        ].map((row, i) => (
+                          <View key={row.label} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>{row.label}</Text>
+                            <View style={{ backgroundColor: row.value ? (row.severe ? '#ef4444' : '#f59e0b') : '#22c55e', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{row.value ? 'YES' : 'NO'}</Text>
+                            </View>
+                          </View>
+                        ))}
+                        <SectionDivider title="Ground Hazards (BGS)" />
+
+                        <View style={[styles.planningRow, { flexDirection: 'row', alignItems: 'center' }]}>
+                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>Landslide (BGS record)</Text>
+                          <View style={{ backgroundColor: hazards.landslideFound ? '#ef4444' : '#22c55e', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{hazards.landslideFound ? 'RECORDED' : 'NONE'}</Text>
+                          </View>
+                        </View>
+                        <View style={[styles.planningRow, styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
+                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>Superficial Geology</Text>
+                          <Text style={{ fontSize: font.sizes.sm, color: colors.accent, fontWeight: '600' }}>{hazards.surfaceGeology ?? 'No data'}</Text>
+                        </View>
+                        <Text style={[styles.floodDisclaimer, { marginTop: spacing.sm }]}>
+                          For shrink-swell clays, dissolution (sinkholes), and compressible ground ratings, commission a GeoSure report from BGS (~£30–60) or a full Groundsure report (~£50–120). Coal Authority interactive map: mapapps2.bgs.ac.uk/coalauthority
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}

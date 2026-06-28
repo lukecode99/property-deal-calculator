@@ -56,10 +56,9 @@ if (!status) {
   process.exit(0);
 }
 
-const now = new Date();
-const fakeTs = '2026-06-28T21:22:00+0100';
+const fakeTs = '2026-06-28T21:45:00+0100';
 execSync(
-  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v29 — fix absolute paths, HMO/schools/price-trend features"`,
+  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v30 — ground risk tab (coal authority + BGS hazards)"`,
   { stdio: 'inherit', shell: true }
 );
 
