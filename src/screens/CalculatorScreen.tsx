@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius, font } from '../theme';
@@ -225,7 +225,7 @@ export function CalculatorScreen() {
   const [hmoLoading, setHmoLoading] = useState(false);
   const [hmoError, setHmoError] = useState<string | null>(null);
 
-  type School = { name: string; type: string; distanceKm: number | null; ofstedRating?: string; urn?: string };
+  type School = { name: string; type: string; distanceKm: number | null; ofstedRating?: string; ofstedFormat?: string; subAspect?: string | null; reportDate?: string | null; reportUrl?: string; urn?: string };
   const [schoolsData, setSchoolsData] = useState<School[] | null>(null);
   const [schoolsLoading, setSchoolsLoading] = useState(false);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
@@ -645,7 +645,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v31</Text>
+        <Text style={styles.title}>Property Deal Calculator v32</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -1073,31 +1073,47 @@ export function CalculatorScreen() {
                     <View>
                       {schoolsData.map((s, i) => {
                         const typeColor = s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6';
-                        const ofstedColor = s.ofstedRating === 'Outstanding' ? '#22c55e'
-                          : s.ofstedRating === 'Good' ? '#3b82f6'
-                          : s.ofstedRating === 'Requires Improvement' ? '#f59e0b'
-                          : s.ofstedRating === 'Inadequate' ? '#ef4444'
+                        const rating = s.ofstedRating ?? 'Not inspected';
+                        const ofstedColor = rating === 'Outstanding' || rating === 'Exceptional' ? '#22c55e'
+                          : rating === 'Good' || rating === 'Strong standard' ? '#3b82f6'
+                          : rating === 'Expected standard' ? '#64748b'
+                          : rating === 'Requires Improvement' || rating === 'Needs attention' ? '#f59e0b'
+                          : rating === 'Inadequate' || rating === 'Urgent improvement' ? '#ef4444'
+                          : rating === 'Not yet inspected' || rating === 'Inspected' ? '#6b7280'
                           : '#6b7280';
+                        const isSubRating = s.ofstedFormat === 'sub-ratings';
                         return (
                           <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { paddingVertical: 8 }]}>
                             <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600', marginBottom: 4 }} numberOfLines={2}>{s.name}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                               <View style={{ backgroundColor: typeColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
                                 <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
                               </View>
-                              <View style={{ backgroundColor: ofstedColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
-                                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.ofstedRating ?? 'Not inspected'}</Text>
+                              <View>
+                                <View style={{ backgroundColor: ofstedColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
+                                  <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{rating}</Text>
+                                </View>
+                                {isSubRating && (
+                                  <Text style={{ fontSize: 8, color: colors.textMuted, marginTop: 1 }}>{s.subAspect ?? 'Achievement'} (new framework)</Text>
+                                )}
                               </View>
                               {s.distanceKm !== null && (
                                 <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted, marginLeft: 'auto' }}>{s.distanceKm}km</Text>
                               )}
                             </View>
+                            {s.reportUrl && (
+                              <TouchableOpacity onPress={() => Linking.openURL(s.reportUrl!)} style={{ marginTop: 4 }}>
+                                <Text style={{ fontSize: 9, color: '#3b82f6', textDecorationLine: 'underline' }}>
+                                  {s.reportDate ? `View report (${s.reportDate})` : 'View report'}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         );
                       })}
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Tap a URN at reports.ofsted.gov.uk to view the full report.</Text>
+                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Post-Sep 2024 schools show Achievement sub-rating under Ofsted's new framework.</Text>
                 </View>
               </View>
             )}
