@@ -142,7 +142,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'schools'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -196,6 +196,11 @@ export function CalculatorScreen() {
   const [rentalData, setRentalData] = useState<RentalData | null>(null);
   const [rentalLoading, setRentalLoading] = useState(false);
   const [rentalError, setRentalError] = useState<string | null>(null);
+
+  type SchoolResult = { name: string; type: string; ofstedRating: string; distanceKm: number; reportUrl: string };
+  const [schoolsData, setSchoolsData] = useState<SchoolResult[] | null>(null);
+  const [schoolsLoading, setSchoolsLoading] = useState(false);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -300,6 +305,19 @@ export function CalculatorScreen() {
       .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
       .catch(e => setRentalError(e.message ?? 'Lookup failed'))
       .finally(() => setRentalLoading(false));
+    // Schools (geocode postcode → lat/lon → schools worker)
+    setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
+      .then(r => r.json())
+      .then((geo: any) => {
+        if (!geo.result) throw new Error('Postcode not found');
+        const { latitude: lat, longitude: lon } = geo.result;
+        return fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lon}&radius=2`);
+      })
+      .then(r => r.json())
+      .then((d: any) => { if (d.error) throw new Error(d.error); setSchoolsData((d.schools ?? []).slice(0, 10)); })
+      .catch(e => setSchoolsError(e.message ?? 'Schools lookup failed'))
+      .finally(() => setSchoolsLoading(false));
   }
 
   useEffect(() => {
@@ -537,7 +555,7 @@ export function CalculatorScreen() {
                   onPress={lookupAllDd}
                   disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading}
                 >
-                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) ? '…' : 'Search'}</Text>
+                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || schoolsLoading) ? '…' : 'Search'}</Text>
                 </TouchableOpacity>
               </View>
               {soldError && <Text style={styles.soldError}>{soldError}</Text>}
@@ -553,6 +571,7 @@ export function CalculatorScreen() {
                 { key: 'transport', label: 'Transport' },
                 { key: 'rental', label: 'Rental' },
                 { key: 'employment', label: 'Employment' },
+                { key: 'schools', label: 'Schools' },
               ] as { key: typeof ddTab; label: string }[]).map(tab => (
                 <TouchableOpacity key={tab.key} style={[styles.ddTab, ddTab === tab.key && styles.ddTabActive]} onPress={() => setDdTab(tab.key)}>
                   <Text style={[styles.ddTabText, ddTab === tab.key && styles.ddTabTextActive]}>{tab.label}</Text>
@@ -882,6 +901,43 @@ export function CalculatorScreen() {
                       </View>
                     );
                   })()}
+                </View>
+              </View>
+            )}
+            {/* Schools sub-tab */}
+            {ddTab === 'schools' && (
+              <View>
+                <View style={styles.card}>
+                  {schoolsError && <Text style={styles.soldError}>{schoolsError}</Text>}
+                  {!schoolsData && !schoolsLoading && !schoolsError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up nearby schools.</Text>}
+                  {schoolsLoading && <Text style={styles.soldNone}>Looking up nearby schools…</Text>}
+                  {schoolsData && schoolsData.length === 0 && (
+                    <Text style={styles.soldNone}>No schools found within 2km of this postcode.</Text>
+                  )}
+                  {schoolsData && schoolsData.length > 0 && (
+                    <View>
+                      {schoolsData.map((s, i) => {
+                        const ratingColor = s.ofstedRating === 'Outstanding' ? '#22c55e'
+                          : s.ofstedRating === 'Good' ? '#84cc16'
+                          : s.ofstedRating === 'Requires improvement' ? '#f59e0b'
+                          : s.ofstedRating === 'Inadequate' ? '#ef4444'
+                          : colors.textMuted;
+                        return (
+                          <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text, fontWeight: '600' }} numberOfLines={2}>{s.name}</Text>
+                              <Text style={{ fontSize: font.sizes.xs, color: ratingColor, fontWeight: '700', marginLeft: 8 }}>{s.ofstedRating || '—'}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+                              <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted }}>{s.type}</Text>
+                              <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted }}>{s.distanceKm}km away</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  <Text style={styles.floodDisclaimer}>Source: Ofsted. Schools within 2km. Outstanding / Good / Requires Improvement / Inadequate.</Text>
                 </View>
               </View>
             )}
