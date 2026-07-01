@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Linking,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius, font } from '../theme';
@@ -85,28 +85,6 @@ function sumItems(items: CustomItem[]): number {
   return items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
 }
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function getSchoolType(tags: Record<string, string>): string {
-  const s = tags.school || '';
-  if (s === 'primary') return 'Primary';
-  if (s === 'secondary') return 'Secondary';
-  if (s === 'sixth_form' || s === 'college') return 'Sixth Form';
-  if (s === 'special') return 'Special';
-  const isced = tags['isced:level'] || '';
-  if (isced.includes('0') || isced.includes('1')) return 'Primary';
-  if (isced.includes('2') || isced.includes('3')) return 'Secondary';
-  return 'School';
-}
-
-const UK_HPI: Record<number, number> = { 2019: 234000, 2020: 250000, 2021: 274000, 2022: 293000, 2023: 285000, 2024: 290000 };
-
 function CustomItemRows({
   items,
   onChange,
@@ -164,7 +142,7 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'hmo' | 'schools' | 'groundrisk'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -218,25 +196,6 @@ export function CalculatorScreen() {
   const [rentalData, setRentalData] = useState<RentalData | null>(null);
   const [rentalLoading, setRentalLoading] = useState(false);
   const [rentalError, setRentalError] = useState<string | null>(null);
-
-  type Article4Area = { name: string; startDate: string };
-  type HmoData = { isArticle4: boolean; areas: Article4Area[]; council: string | null };
-  const [hmoData, setHmoData] = useState<HmoData | null>(null);
-  const [hmoLoading, setHmoLoading] = useState(false);
-  const [hmoError, setHmoError] = useState<string | null>(null);
-
-  type School = { name: string; type: string; distanceKm: number | null; ofstedRating?: string; ofstedFormat?: string; subAspect?: string | null; reportDate?: string | null; reportUrl?: string; urn?: string };
-  const [schoolsData, setSchoolsData] = useState<School[] | null>(null);
-  const [schoolsLoading, setSchoolsLoading] = useState(false);
-  const [schoolsError, setSchoolsError] = useState<string | null>(null);
-
-  type GroundRiskData = {
-    coal: { highRisk: boolean; surfaceMining: boolean; coalResource: boolean; reportingArea: boolean };
-    hazards: { landslideFound: boolean; surfaceGeology: string | null };
-  };
-  const [groundRiskData, setGroundRiskData] = useState<GroundRiskData | null>(null);
-  const [groundRiskLoading, setGroundRiskLoading] = useState(false);
-  const [groundRiskError, setGroundRiskError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -341,97 +300,6 @@ export function CalculatorScreen() {
       .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
       .catch(e => setRentalError(e.message ?? 'Lookup failed'))
       .finally(() => setRentalLoading(false));
-    // HMO Article 4 + Schools — both require geocoding
-    setHmoLoading(true); setHmoError(null); setHmoData(null);
-    setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
-    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then(async (geo: any) => {
-        if (!geo.result) throw new Error('Postcode geocoding failed');
-        const lat: number = geo.result.latitude;
-        const lng: number = geo.result.longitude;
-        const council: string | null = geo.result.admin_district ?? null;
-        // Article 4 Direction
-        fetch(`https://www.planning.data.gov.uk/entity.json?dataset=article-4-direction-area&entries=current&geometry=POINT(${lng}+${lat})&geometry_relation=intersects&limit=20`)
-          .then(r => r.json())
-          .then((a4: any) => {
-            const entities: any[] = a4.entities ?? [];
-            setHmoData({
-              isArticle4: entities.length > 0,
-              areas: entities.map((e: any) => ({ name: e.name || e['article-4-direction'] || 'Unknown', startDate: e['start-date'] || '' })),
-              council,
-            });
-          })
-          .catch(e => setHmoError(e.message ?? 'Article 4 lookup failed'))
-          .finally(() => setHmoLoading(false));
-        // Schools + Ofsted ratings via Cloudflare Worker (scrapes reports.ofsted.gov.uk)
-        fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lng}&radius=2`)
-          .then(r => r.json())
-          .then((d: any) => {
-            if (d.error) throw new Error(d.error);
-            setSchoolsData((d.schools ?? []).slice(0, 10));
-          })
-          .catch(e => setSchoolsError(e.message ?? 'Schools lookup failed'))
-          .finally(() => setSchoolsLoading(false));
-      })
-      .catch(e => {
-        setHmoError(e.message ?? 'Geocoding failed'); setHmoLoading(false);
-        setSchoolsError(e.message ?? 'Geocoding failed'); setSchoolsLoading(false);
-      });
-    // Ground Risk — Coal Authority WMS + BGS hazards (uses geocoded lat/lng from postcodes.io)
-    setGroundRiskLoading(true); setGroundRiskError(null); setGroundRiskData(null);
-    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then(async (geo: any) => {
-        if (!geo.result) throw new Error('Postcode not found');
-        const lat: number = geo.result.latitude;
-        const lng: number = geo.result.longitude;
-        const d = 0.01;
-        const bbox = `${lng - d},${lat - d},${lng + d},${lat + d}`;
-        const wmsBase = 'https://map.bgs.ac.uk/arcgis/services/CoalAuthority/coalauthority_planning_policy_constraints/MapServer/WMSServer';
-        const bgsHazBase = 'https://map.bgs.ac.uk/arcgis/services/GeoIndex_Onshore/hazards/MapServer/WMSServer';
-        const bgsEngBase = 'https://map.bgs.ac.uk/arcgis/services/EngineeringWebGIS/EngineeringWebGIS/MapServer/WMSServer';
-        function wmsUrl(base: string, layer: string) {
-          return `${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS=${encodeURIComponent(layer)}&QUERY_LAYERS=${encodeURIComponent(layer)}&BBOX=${bbox}&SRS=EPSG:4326&WIDTH=101&HEIGHT=101&X=50&Y=50&INFO_FORMAT=text/plain`;
-        }
-        function wmsHit(text: string): boolean {
-          return !text.includes('No features found') && text.trim().length > 0;
-        }
-        const [highRiskTxt, surfMineTxt, coalResTxt, reportTxt, landslideTxt, supGeolTxt] = await Promise.all([
-          fetch(wmsUrl(wmsBase, 'Development.High.Risk.Area')).then(r => r.text()).catch(() => ''),
-          fetch(wmsUrl(wmsBase, 'Surface.Mining.Past.and.Current')).then(r => r.text()).catch(() => ''),
-          fetch(wmsUrl(wmsBase, 'Surface.Coal.Resource.Areas')).then(r => r.text()).catch(() => ''),
-          fetch(wmsUrl(wmsBase, 'Coal.Mining.Reporting.Area')).then(r => r.text()).catch(() => ''),
-          fetch(wmsUrl(bgsHazBase, 'Landslides')).then(r => r.text()).catch(() => ''),
-          fetch(wmsUrl(bgsEngBase, '_:1M_Superficial_Engineering_Geology38490')).then(r => r.text()).catch(() => ''),
-        ]);
-        let surfaceGeology: string | null = null;
-        if (supGeolTxt && !supGeolTxt.includes('No features found')) {
-          const match = supGeolTxt.match(/ENG_DESC[^;]*;([^;]+);/);
-          if (!match) {
-            const parts = supGeolTxt.split(';');
-            const hdrIdx = parts.findIndex(p => p.includes('ENG_DESC'));
-            if (hdrIdx >= 0 && parts.length > hdrIdx + 4) surfaceGeology = parts[hdrIdx + 4]?.trim() || null;
-          } else {
-            surfaceGeology = match[1]?.trim() || null;
-          }
-          if (!surfaceGeology) {
-            const lines = supGeolTxt.split('\n').filter(l => l.trim());
-            if (lines.length >= 2) {
-              const hdr = lines[0].split(';').map((h: string) => h.trim());
-              const vals = lines[1].split(';').map((v: string) => v.trim());
-              const idx = hdr.indexOf('ENG_DESC');
-              if (idx >= 0 && vals[idx]) surfaceGeology = vals[idx];
-            }
-          }
-        }
-        setGroundRiskData({
-          coal: { highRisk: wmsHit(highRiskTxt), surfaceMining: wmsHit(surfMineTxt), coalResource: wmsHit(coalResTxt), reportingArea: wmsHit(reportTxt) },
-          hazards: { landslideFound: wmsHit(landslideTxt), surfaceGeology },
-        });
-      })
-      .catch(e => setGroundRiskError(e.message ?? 'Ground risk lookup failed'))
-      .finally(() => setGroundRiskLoading(false));
   }
 
   useEffect(() => {
@@ -645,7 +513,7 @@ export function CalculatorScreen() {
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
 
         {/* Header */}
-        <Text style={styles.title}>Property Deal Calculator v35</Text>
+        <Text style={styles.title}>Property Deal Calculator v28</Text>
         <Text style={styles.subtitle}>UK BTL · HMO · Short-Term Lets</Text>
 
         {/* ── DUE DILIGENCE VIEW ── */}
@@ -665,11 +533,11 @@ export function CalculatorScreen() {
                   onSubmitEditing={lookupAllDd}
                 />
                 <TouchableOpacity
-                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading) && styles.soldSearchBtnDisabled]}
+                  style={[styles.soldSearchBtn, (soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) && styles.soldSearchBtnDisabled]}
                   onPress={lookupAllDd}
-                  disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading}
+                  disabled={soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading}
                 >
-                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading || hmoLoading || schoolsLoading) ? '…' : 'Search'}</Text>
+                  <Text style={styles.soldSearchBtnText}>{(soldLoading || floodLoading || planningLoading || epcLoading || crimeLoading || transportLoading) ? '…' : 'Search'}</Text>
                 </TouchableOpacity>
               </View>
               {soldError && <Text style={styles.soldError}>{soldError}</Text>}
@@ -685,9 +553,6 @@ export function CalculatorScreen() {
                 { key: 'transport', label: 'Transport' },
                 { key: 'rental', label: 'Rental' },
                 { key: 'employment', label: 'Employment' },
-                { key: 'hmo', label: 'HMO' },
-                { key: 'schools', label: 'Schools' },
-                { key: 'groundrisk', label: 'Ground Risk' },
               ] as { key: typeof ddTab; label: string }[]).map(tab => (
                 <TouchableOpacity key={tab.key} style={[styles.ddTab, ddTab === tab.key && styles.ddTabActive]} onPress={() => setDdTab(tab.key)}>
                   <Text style={[styles.ddTabText, ddTab === tab.key && styles.ddTabTextActive]}>{tab.label}</Text>
@@ -721,52 +586,6 @@ export function CalculatorScreen() {
                       <Text style={styles.soldFootnote}>* New build   ·   Source: HM Land Registry</Text>
                     </View>
                   )}
-                  {soldPrices && soldPrices.length > 0 && (() => {
-                    const byYear: Record<number, number[]> = {};
-                    for (const s of soldPrices) {
-                      const yr = s.date ? new Date(s.date).getFullYear() : 0;
-                      if (yr > 2000) { (byYear[yr] = byYear[yr] ?? []).push(s.price); }
-                    }
-                    const rows = Object.entries(byYear)
-                      .map(([yr, prices]) => {
-                        const sorted = [...prices].sort((a, b) => a - b);
-                        const mid = Math.floor(sorted.length / 2);
-                        const median = sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-                        return { year: Number(yr), median, count: prices.length };
-                      })
-                      .sort((a, b) => a.year - b.year);
-                    if (rows.length < 2) return null;
-                    return (
-                      <View style={{ marginTop: spacing.md }}>
-                        <Text style={[styles.soldHeaderText, { marginBottom: spacing.xs }]}>Price Trend by Year</Text>
-                        <View style={[styles.soldTableHeader, { flexDirection: 'row' }]}>
-                          <Text style={[styles.soldHeaderText, { flex: 1 }]}>Year</Text>
-                          <Text style={[styles.soldHeaderText, { flex: 1.5, textAlign: 'right' }]}>Local median</Text>
-                          <Text style={[styles.soldHeaderText, { flex: 1, textAlign: 'right' }]}>YoY</Text>
-                          <Text style={[styles.soldHeaderText, { flex: 1.5, textAlign: 'right' }]}>UK avg</Text>
-                        </View>
-                        {rows.map((row, i) => {
-                          const prev = rows[i - 1];
-                          const yoy = prev ? ((row.median - prev.median) / prev.median) * 100 : null;
-                          const ukAvg = UK_HPI[row.year] ?? null;
-                          const yoyColor = yoy == null ? colors.textMuted : yoy >= 0 ? '#22c55e' : '#ef4444';
-                          return (
-                            <View key={row.year} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
-                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>{row.year} ({row.count})</Text>
-                              <Text style={{ flex: 1.5, fontSize: font.sizes.sm, color: colors.accent, textAlign: 'right', fontWeight: '700' }}>£{row.median.toLocaleString('en-GB')}</Text>
-                              <Text style={{ flex: 1, fontSize: font.sizes.sm, color: yoyColor, textAlign: 'right', fontWeight: '700' }}>
-                                {yoy != null ? `${yoy >= 0 ? '+' : ''}${yoy.toFixed(1)}%` : '—'}
-                              </Text>
-                              <Text style={{ flex: 1.5, fontSize: font.sizes.sm, color: colors.textMuted, textAlign: 'right' }}>
-                                {ukAvg ? `£${(ukAvg / 1000).toFixed(0)}k` : '—'}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                        <Text style={styles.soldFootnote}>Local = median of sales in this postcode. UK avg = England & Wales national average (Land Registry). YoY = year-on-year change.</Text>
-                      </View>
-                    );
-                  })()}
                 </View>
               </View>
             )}
@@ -1006,170 +825,6 @@ export function CalculatorScreen() {
                     </View>
                   )}
                   <Text style={styles.floodDisclaimer}>LHA = 30th pct (VOA, live). Median = 50th pct. 75th Percentile = upper quartile. ONS PRMS Oct 2022–Sep 2023 — current rents likely higher. All monthly.</Text>
-                </View>
-              </View>
-            )}
-
-            {/* HMO / Article 4 sub-tab */}
-            {ddTab === 'hmo' && (
-              <View>
-                <View style={styles.card}>
-                  {hmoError && <Text style={styles.soldError}>{hmoError}</Text>}
-                  {!hmoData && !hmoLoading && !hmoError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to check Article 4 Direction status.</Text>}
-                  {hmoLoading && <Text style={styles.soldNone}>Checking Article 4 Direction areas…</Text>}
-                  {hmoData && (
-                    <View>
-                      <View style={[styles.floodLevelRow, { marginBottom: spacing.sm }]}>
-                        <Text style={styles.floodLevelIcon}>{hmoData.isArticle4 ? '🔴' : '🟢'}</Text>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.floodLevelLabel}>
-                            {hmoData.isArticle4 ? 'Article 4 Direction in effect' : 'No Article 4 Direction found'}
-                          </Text>
-                          {hmoData.council && <Text style={styles.floodLevelSub}>Council: {hmoData.council}</Text>}
-                        </View>
-                      </View>
-                      {hmoData.isArticle4 && hmoData.areas.length > 0 && (
-                        <View style={{ marginBottom: spacing.sm }}>
-                          {hmoData.areas.map((a, i) => (
-                            <View key={i} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt]}>
-                              <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600' }}>{a.name}</Text>
-                              {a.startDate ? <Text style={styles.planningDate}>In force since {a.startDate}</Text> : null}
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                      {hmoData.isArticle4 ? (
-                        <Text style={styles.planningNote}>
-                          ⚠️ Article 4 Direction removes Permitted Development Rights in this area. Converting a C3 dwelling to a C4 HMO (3–6 occupants) requires full planning permission. Check with {hmoData.council ?? 'the local authority'} before purchasing.
-                        </Text>
-                      ) : (
-                        <Text style={styles.planningNote}>
-                          ✓ No Article 4 Direction detected at this postcode. Standard Permitted Development Rights apply — small HMOs (C4, 3–6 occupants) may not require planning permission, but always verify with the local authority.
-                        </Text>
-                      )}
-                      {hmoData.council && (
-                        <Text style={[styles.floodDisclaimer, { marginTop: spacing.xs }]}>
-                          Search HMO licensing for {hmoData.council} at your local authority website or gov.uk.
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                  <Text style={styles.floodDisclaimer}>Source: planning.data.gov.uk Article 4 Direction Areas dataset. For HMO licensing, contact the local authority directly.</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Schools sub-tab */}
-            {ddTab === 'schools' && (
-              <View>
-                <View style={styles.card}>
-                  {schoolsError && <Text style={styles.soldError}>{schoolsError}</Text>}
-                  {!schoolsData && !schoolsLoading && !schoolsError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to find nearby schools.</Text>}
-                  {schoolsLoading && <Text style={styles.soldNone}>Finding nearby schools…</Text>}
-                  {schoolsData && schoolsData.length === 0 && (
-                    <Text style={styles.soldNone}>No schools found within 2km of this postcode.</Text>
-                  )}
-                  {schoolsData && schoolsData.length > 0 && (
-                    <View>
-                      {schoolsData.map((s, i) => {
-                        const typeColor = s.type === 'Secondary' ? '#3b82f6' : s.type === 'Primary' ? '#22c55e' : '#8b5cf6';
-                        const isSubRating = s.ofstedFormat === 'sub-ratings';
-                        const isNotInspected = s.ofstedFormat === 'none';
-                        const rating = s.ofstedRating ?? 'Not inspected';
-                        const ofstedColor = rating === 'Outstanding' ? '#22c55e'
-                          : rating === 'Good' ? '#3b82f6'
-                          : rating === 'Requires Improvement' ? '#f59e0b'
-                          : rating === 'Inadequate' ? '#ef4444'
-                          : '#6b7280';
-                        return (
-                          <View key={i} style={[styles.soldTableRow, i % 2 === 1 && styles.soldTableRowAlt, { paddingVertical: 8, flexDirection: 'column', width: '100%' }]}>
-                            <Text style={{ fontSize: font.sizes.sm, color: colors.text, fontWeight: '600', marginBottom: 6, flexShrink: 1 }} numberOfLines={3}>{s.name}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <View style={{ backgroundColor: typeColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
-                                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{s.type}</Text>
-                              </View>
-                              {!isSubRating && (
-                                <View style={{ backgroundColor: ofstedColor, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 }}>
-                                  <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{rating}</Text>
-                                </View>
-                              )}
-                              {s.reportUrl && (
-                                <TouchableOpacity onPress={() => Linking.openURL(s.reportUrl!)}>
-                                  <Text style={{ fontSize: 10, color: '#3b82f6', textDecorationLine: 'underline' }}>View Ofsted report →</Text>
-                                </TouchableOpacity>
-                              )}
-                            </View>
-                            {s.distanceKm !== null && (
-                              <Text style={{ fontSize: font.sizes.xs, color: colors.textMuted, marginTop: 4 }}>{s.distanceKm}km away</Text>
-                            )}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                  <Text style={styles.floodDisclaimer}>Source: Ofsted (reports.ofsted.gov.uk). Schools within 2km, sorted by distance. Post-Sep 2024 schools link directly to report — Ofsted no longer gives overall grades for state schools.</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Ground Risk sub-tab */}
-            {ddTab === 'groundrisk' && (
-              <View>
-                <View style={styles.card}>
-                  {groundRiskError && <Text style={styles.soldError}>{groundRiskError}</Text>}
-                  {!groundRiskData && !groundRiskLoading && !groundRiskError && (
-                    <Text style={styles.soldNone}>Enter a postcode above and tap Search to check ground risk.</Text>
-                  )}
-                  {groundRiskLoading && <Text style={styles.soldNone}>Checking coal and ground risk data…</Text>}
-                  {groundRiskData && (() => {
-                    const { coal, hazards } = groundRiskData;
-                    const isRedAlert = coal.highRisk || coal.surfaceMining;
-                    const isAmber = coal.coalResource || coal.reportingArea || hazards.landslideFound;
-                    const ragBg = isRedAlert ? '#ef4444' : isAmber ? '#f59e0b' : '#22c55e';
-                    const ragLabel = isRedAlert ? 'HIGH RISK' : isAmber ? 'MODERATE RISK' : 'LOW RISK';
-                    const ragSub = isRedAlert
-                      ? 'Coal mining high-risk area or surface mining present — specialist survey essential before purchase.'
-                      : isAmber
-                      ? 'Coal resource area, reporting area, or ground hazard noted — check coal authority and specialist report.'
-                      : 'No significant coal or ground risk identified at this postcode.';
-                    return (
-                      <View>
-                        <View style={{ backgroundColor: ragBg, borderRadius: 8, padding: spacing.md, marginBottom: spacing.md, alignItems: 'center' }}>
-                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: font.sizes.md }}>{ragLabel}</Text>
-                          <Text style={{ color: '#fff', fontSize: font.sizes.sm, textAlign: 'center', marginTop: 4 }}>{ragSub}</Text>
-                        </View>
-                        <Text style={{ fontSize: font.sizes.sm, fontWeight: '700', color: colors.text, marginBottom: 6 }}>Coal Mining Risk (Coal Authority)</Text>
-                        {[
-                          { label: 'Development High Risk Area', value: coal.highRisk, severe: true },
-                          { label: 'Surface Mining (Past/Current)', value: coal.surfaceMining, severe: true },
-                          { label: 'Coal Resource Area', value: coal.coalResource, severe: false },
-                          { label: 'Coal Mining Reporting Area', value: coal.reportingArea, severe: false },
-                        ].map((row, i) => (
-                          <View key={row.label} style={[styles.planningRow, i % 2 === 1 && styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
-                            <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>{row.label}</Text>
-                            <View style={{ backgroundColor: row.value ? (row.severe ? '#ef4444' : '#f59e0b') : '#22c55e', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{row.value ? 'YES' : 'NO'}</Text>
-                            </View>
-                          </View>
-                        ))}
-                        <SectionDivider title="Ground Hazards (BGS)" />
-
-                        <View style={[styles.planningRow, { flexDirection: 'row', alignItems: 'center' }]}>
-                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>Landslide (BGS record)</Text>
-                          <View style={{ backgroundColor: hazards.landslideFound ? '#ef4444' : '#22c55e', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                            <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{hazards.landslideFound ? 'RECORDED' : 'NONE'}</Text>
-                          </View>
-                        </View>
-                        <View style={[styles.planningRow, styles.planningRowAlt, { flexDirection: 'row', alignItems: 'center' }]}>
-                          <Text style={{ flex: 1, fontSize: font.sizes.sm, color: colors.text }}>Superficial Geology</Text>
-                          <Text style={{ fontSize: font.sizes.sm, color: colors.accent, fontWeight: '600' }}>{hazards.surfaceGeology ?? 'No data'}</Text>
-                        </View>
-                        <Text style={[styles.floodDisclaimer, { marginTop: spacing.sm }]}>
-                          For shrink-swell clays, dissolution (sinkholes), and compressible ground ratings, commission a GeoSure report from BGS (~£30–60) or a full Groundsure report (~£50–120). Coal Authority interactive map: mapapps2.bgs.ac.uk/coalauthority
-                        </Text>
-                      </View>
-                    );
-                  })()}
                 </View>
               </View>
             )}
@@ -1461,7 +1116,7 @@ export function CalculatorScreen() {
         {/* Ownership toggle */}
         <View style={styles.card}>
           <View style={styles.toggleRow}>
-            <View style={{ flex: 1, marginRight: 8 }}>
+            <View>
               <Text style={styles.label}>Ownership Structure</Text>
               <Text style={styles.hint}>Affects Section 24 tax treatment</Text>
             </View>
@@ -1593,7 +1248,7 @@ export function CalculatorScreen() {
           {/* Initial Financing (inline, when refinancing — bridging only) */}
           {inputs.refinanceAfterRefurb === 'yes' && (
             <View style={styles.subCard}>
-              <Text style={styles.subSectionTitle}>Bridging Finance</Text>
+              <Text style={styles.subSectionTitle}>Initial / Bridging Finance</Text>
               <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder={inputs.purchasePrice || 'e.g. 180000'} hint="Defaults to purchase price if blank" />
               <InputField label="Duration (months)" value={inputs.bridgingDurationMonths} onChangeText={set('bridgingDurationMonths')} placeholder="6" />
               <View style={styles.feeRow}>
@@ -1893,7 +1548,7 @@ export function CalculatorScreen() {
 
             {inputs.refinanceAfterRefurb === 'yes' && results.initialFinancingCost != null && (
               <>
-                <SectionDivider title="Bridging Finance" />
+                <SectionDivider title="Initial / Bridging Finance" />
                 {results.initialFinancingInterest != null && (
                   <ResultRow label="Total Interest" value={fmtGbp(results.initialFinancingInterest)} muted indent />
                 )}
