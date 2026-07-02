@@ -1082,9 +1082,7 @@ export function CalculatorScreen() {
                     <TouchableOpacity style={styles.csvBtn} onPress={exportCSV}>
                       <Text style={styles.csvBtnText}>Export CSV</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setSavedDeals([])}>
-                      <Text style={styles.clearAll}>Clear all</Text>
-                    </TouchableOpacity>
+
                   </View>
                 </View>
 
@@ -2023,7 +2021,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   compareTitle: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700' },
-  clearAll: { color: colors.textMuted, fontSize: font.sizes.xs },
   csvBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryMuted },
   csvBtnText: { color: colors.primary, fontSize: font.sizes.xs, fontWeight: '700' },
   planningNote: { color: colors.textMuted, fontSize: font.sizes.xs, fontStyle: 'italic', marginBottom: spacing.sm },
