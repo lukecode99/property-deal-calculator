@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Share, Platform,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Platform, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius, font } from '../theme';
 import { DealInputs, DealExtras, Strategy, Ownership, RefurbMode, FeeMode, DEFAULT_INPUTS } from '../types';
 import { calcDeal } from '../engine/dealEngine';
-import { generateAndShareDealPDF } from '../utils/generateDealReport';
 import { InputField } from '../components/InputField';
 import { SliderField } from '../components/SliderField';
 import { ResultRow, SectionDivider, fmtGbp, fmtPct } from '../components/ResultRow';
@@ -46,8 +45,6 @@ interface SavedDeal {
   monthlyMortgage: number;
   fiveYearTotalReturn?: number;
   floodRiskLevel?: 'low' | 'medium' | 'high';
-  floodRiskZoneLabel?: string;
-  floodRiskAnnualProb?: string;
   inputs: DealInputs;
 }
 
@@ -385,30 +382,95 @@ export function CalculatorScreen() {
       .finally(() => setPlanningLoading(false));
   }
 
-  async function exportCSV() {
+  function exportCSV() {
     if (savedDeals.length === 0) return;
-    const headers = ['Label', 'Strategy', 'Purchase Price', 'Monthly Rent', 'Total Invested', 'Capital Left In', 'Monthly Cashflow', 'Gross Yield %', 'Net Yield %', 'Cash-on-Cash %', 'Monthly Mortgage', 'Stamp Duty'];
-    const rows = savedDeals.map(d => [
-      d.label,
-      d.strategy.toUpperCase(),
-      d.inputs.purchasePrice,
-      d.inputs.strategy === 'hmo' ? String(Number(d.inputs.hmoRooms) * Number(d.inputs.hmoRentPerRoom)) : (d.inputs.rentPerMonth || ''),
-      String(Math.round(d.totalInvested)),
-      d.capitalLeftIn != null ? String(Math.round(d.capitalLeftIn)) : '',
-      String(Math.round(d.monthlyNetCashflow)),
-      String(d.grossYield.toFixed(2)),
-      String(d.netYield.toFixed(2)),
-      String(d.cashOnCash.toFixed(2)),
-      String(Math.round(d.monthlyMortgage)),
-      String(Math.round(d.stampDuty)),
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`));
+
+    const g = (v: number) => String(Math.round(v));
+    const pct = (v: number) => v.toFixed(2);
+
+    const headers = [
+      // ── Inputs ─────────────────────────────────────────────
+      'Label', 'Strategy', 'Ownership',
+      'Purchase Price', 'Fair Value', 'Renovated Value', 'EPC Rating', 'Bedrooms',
+      'Solicitor Fees', 'Mortgage Fee', 'Other Costs',
+      'Refurb Cost', 'Refurb Contingency %', 'Holding Costs',
+      'Deposit %', 'Mortgage Rate %', 'Initial Term (yrs)', 'Future Rate %', 'Mortgage Term (yrs)',
+      'Rent/Month (BTL)', 'Nightly Rate (STL)', 'Occupancy % (STL)',
+      'HMO Rooms', 'HMO Rent/Room', 'HMO Void Weeks/Room',
+      'Service Charge (annual)', 'Insurance (annual)', 'Management Fee %', 'Maintenance %', 'Void Months/yr',
+      'Capital Growth %', 'Annual Rent Increase %',
+      // ── Computed: purchase breakdown ───────────────────────
+      'Stamp Duty (SDLT)', 'Deposit Amount', 'Mortgage Amount',
+      'Monthly Mortgage (loan × rate ÷ 12)',
+      'Total Purchase Costs (deposit + SDLT + solicitor + fee + other)',
+      'Total Invested (purchase costs + refurb + holding)',
+      'Capital on Purchase (fair value − price)',
+      // ── Income & cashflow ──────────────────────────────────
+      'Monthly Gross Income', 'Monthly OPEX',
+      'Monthly Net Cashflow (gross − mortgage − OPEX)',
+      'Annual Net Cashflow (monthly × 12)',
+      // ── Yields ─────────────────────────────────────────────
+      'Gross Yield % (annual gross ÷ price × 100)',
+      'Net Yield % (annual net ÷ price × 100)',
+      'Cash-on-Cash % (annual net ÷ invested × 100)',
+      // ── Stress tests ───────────────────────────────────────
+      'Stress: Rent −10% (monthly cashflow)',
+      'Stress: Rate at Future Rate (monthly cashflow)',
+      'Stress: 4-Week Void (monthly cashflow)',
+      // ── 5-year projection ──────────────────────────────────
+      '5yr Estimated Value', '5yr Capital Growth',
+      '5yr Cumulative Cashflow', '5yr Total Return',
+      // ── Extra ──────────────────────────────────────────────
+      'Flood Risk',
+    ];
+
+    const rows = savedDeals.map(d => {
+      const r = calcDeal(d.inputs);
+      const price = parseFloat(d.inputs.purchasePrice.replace(/,/g, '')) || 0;
+      const depositAmt = r ? price - r.mortgageAmount : 0;
+      return [
+        d.label, d.strategy, d.inputs.ownership,
+        d.inputs.purchasePrice, d.inputs.estimatedFairValue || '', d.inputs.renovatedValue || '',
+        d.inputs.epcRating || '', d.inputs.bedrooms || '',
+        d.inputs.solicitorFees, d.inputs.mortgageFee, d.inputs.other,
+        d.inputs.refurbCost, d.inputs.refurbContingencyPct, d.inputs.holdingCosts || '',
+        d.inputs.depositPct, d.inputs.interestRate, d.inputs.mortgageInitialTerm,
+        d.inputs.mortgageFutureRate || '', d.inputs.mortgageTerm,
+        d.inputs.rentPerMonth || '', d.inputs.nightlyRate || '', d.inputs.occupancyPct || '',
+        d.inputs.hmoRooms || '', d.inputs.hmoRentPerRoom || '', d.inputs.hmoVoidWeeksPerRoom || '',
+        d.inputs.serviceCharge || '', d.inputs.insurance || '',
+        d.inputs.mgmtFeePct || '', d.inputs.maintenancePct || '', d.inputs.voidMonths || '',
+        d.inputs.capitalGrowthPct || '', d.inputs.annualIncomeIncreasePct || '',
+        // Computed
+        r ? g(r.stampDuty) : g(d.stampDuty),
+        g(depositAmt),
+        r ? g(r.mortgageAmount) : '',
+        r ? g(r.monthlyMortgage) : g(d.monthlyMortgage),
+        r ? g(r.totalPurchaseCosts) : '',
+        r ? g(r.totalInvested) : g(d.totalInvested),
+        r?.capitalOnPurchase != null ? g(r.capitalOnPurchase) : '',
+        r ? g(r.monthlyGrossIncome) : '',
+        r ? g(r.monthlyOpex) : '',
+        r ? g(r.monthlyNetCashflow) : g(d.monthlyNetCashflow),
+        r ? g(r.annualNetCashflow) : g(d.monthlyNetCashflow * 12),
+        r ? pct(r.grossYield) : pct(d.grossYield),
+        r ? pct(r.netYield) : pct(d.netYield),
+        r ? pct(r.cashOnCash) : pct(d.cashOnCash),
+        r ? g(r.stress.rent10pctDrop) : '',
+        r ? g(r.stress.ratesAtFutureRate) : '',
+        r ? g(r.stress.void4weeks) : '',
+        r ? g(r.projection5yr.estimatedValue) : '',
+        r ? g(r.projection5yr.capitalGrowth) : '',
+        r ? g(r.projection5yr.cumulativeCashflow) : '',
+        r ? g(r.projection5yr.totalReturn) : g(d.fiveYearTotalReturn ?? 0),
+        d.floodRiskLevel || '',
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+    });
+
     const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
+
     if (Platform.OS !== 'web') {
-      try {
-        await Share.share({ message: csv, title: 'Property Deals' });
-      } catch (err) {
-        console.error('Export CSV Share failed:', err);
-      }
+      Share.share({ message: csv, title: 'property-deals.csv' }).catch(() => {});
       return;
     }
     const a = document.createElement('a');
@@ -441,8 +503,6 @@ export function CalculatorScreen() {
         monthlyMortgage: results.monthlyMortgage,
         fiveYearTotalReturn: results.projection5yr.totalReturn,
         floodRiskLevel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.level : undefined,
-        floodRiskZoneLabel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.zoneLabel : undefined,
-        floodRiskAnnualProb: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.annualProbability : undefined,
         inputs: { ...inputs },
       }];
       return next;
@@ -467,8 +527,6 @@ export function CalculatorScreen() {
       monthlyMortgage: results.monthlyMortgage,
       fiveYearTotalReturn: results.projection5yr.totalReturn,
       floodRiskLevel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.level : d.floodRiskLevel,
-      floodRiskZoneLabel: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.zoneLabel : d.floodRiskZoneLabel,
-      floodRiskAnnualProb: floodRisk?.postcode && formatPostcode(inputs.postcode) === floodRisk.postcode ? floodRisk.annualProbability : d.floodRiskAnnualProb,
       inputs: { ...inputs },
     } : d));
     setEditingDealId(null);
@@ -481,40 +539,12 @@ export function CalculatorScreen() {
     setView('calculator');
   }
 
-  async function shareDealReport(deal: SavedDeal) {
+  function shareDealReport(deal: SavedDeal) {
     const stratColors: Record<string, string> = {
-      btl: '#3B82F6', stl: '#10B981', hmo: '#F59E0B',
+      BTL: '#3B82F6', BRRR: '#8B5CF6', HMO: '#F59E0B', STL: '#10B981', FLIP: '#EF4444',
     };
     const color = stratColors[deal.strategy] || '#3B82F6';
     const f = (n: number, d = 0) => n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
-
-    // Native iOS/Android: generate and share a rich PDF report
-    if (Platform.OS !== 'web') {
-      try {
-        await generateAndShareDealPDF({
-          label: deal.label,
-          strategy: deal.strategy,
-          inputs: deal.inputs,
-          stampDuty: deal.stampDuty,
-          monthlyMortgage: deal.monthlyMortgage,
-          totalInvested: deal.totalInvested,
-          capitalLeftIn: deal.capitalLeftIn,
-          cashOnCash: deal.cashOnCash,
-          monthlyNetCashflow: deal.monthlyNetCashflow,
-          grossYield: deal.grossYield,
-          netYield: deal.netYield,
-          fiveYearTotalReturn: deal.fiveYearTotalReturn,
-          floodRiskLevel: deal.floodRiskLevel,
-          floodRiskZoneLabel: deal.floodRiskZoneLabel,
-          floodRiskAnnualProb: deal.floodRiskAnnualProb,
-        });
-      } catch (err) {
-        console.error('PDF share failed:', err);
-      }
-      return;
-    }
-
-    // Web: open a print-friendly report in a new window
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deal: ${deal.label}</title>
 <style>
   body { font-family: -apple-system, sans-serif; margin: 0; padding: 24px; color: #1a1a2e; }
@@ -540,13 +570,17 @@ export function CalculatorScreen() {
 </div>
 <div class="section">
   <div class="row"><span>Purchase Price</span><span>£${f(Number(deal.inputs.purchasePrice) || 0)}</span></div>
-  <div class="row"><span>Monthly Rent</span><span>£${f(Number(deal.inputs.rentPerMonth) || 0)}</span></div>
+  <div class="row"><span>Monthly Rent</span><span>£${f(Number(deal.inputs.monthlyRent) || 0)}</span></div>
   <div class="row"><span>Monthly Mortgage</span><span>£${f(deal.monthlyMortgage)}</span></div>
   <div class="row"><span>Net Yield</span><span>${f(deal.netYield, 1)}%</span></div>
   <div class="row"><span>Stamp Duty</span><span>£${f(deal.stampDuty)}</span></div>
 </div>
 <footer>Generated by Property Deal Calculator</footer>
 </body></html>`;
+    if (Platform.OS !== 'web') {
+      Share.share({ message: `${deal.label}\n\nOpen in a browser to view the full report.`, title: deal.label }).catch(() => {});
+      return;
+    }
     const win = window.open('', '_blank');
     if (win) {
       win.document.write(html);
