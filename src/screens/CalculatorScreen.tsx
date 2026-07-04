@@ -88,6 +88,25 @@ function sumItems(items: CustomItem[]): number {
   return items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
 }
 
+function AccordionHeader({ title, summary, open, onToggle, right }: {
+  title: string;
+  summary?: string;
+  open: boolean;
+  onToggle: () => void;
+  right?: React.ReactNode;
+}) {
+  return (
+    <TouchableOpacity style={styles.accHeader} onPress={onToggle} activeOpacity={0.7}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {!open && summary ? <Text style={styles.accSummary} numberOfLines={1}>{summary}</Text> : null}
+      </View>
+      {right}
+      <Text style={styles.accChevron}>{open ? '▾' : '▸'}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function CustomItemRows({
   items,
   onChange,
@@ -149,6 +168,10 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
+  // Accordion: only Purchase Price + Income open by default — core fields first
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ purchase: true, income: true });
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const toggleSection = (k: string) => setOpenSections(prev => ({ ...prev, [k]: !prev[k] }));
 
   // Restore saved deals + last inputs on launch. Merging over DEFAULT_INPUTS
   // keeps deals/inputs stored by older builds valid when new fields are added.
@@ -1242,34 +1265,60 @@ export function CalculatorScreen() {
           ))}
         </View>
 
+        {/* New Deal reset + Advanced toggle */}
+        <View style={styles.utilityRow}>
+          <TouchableOpacity
+            style={styles.advancedPill}
+            onPress={() => {
+              setInputs({ ...DEFAULT_INPUTS, strategy: inputs.strategy });
+              setCustomRefurb([]); setCustomStlSetup([]); setCustomStlMonthly([]);
+              setEditingDealId(null);
+            }}
+          >
+            <Text style={styles.advancedPillText}>⟲ New Deal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.advancedPill, showAdvanced && styles.advancedPillActive]}
+            onPress={() => setShowAdvanced(v => !v)}
+          >
+            <Text style={[styles.advancedPillText, showAdvanced && styles.advancedPillTextActive]}>⚙ Advanced {showAdvanced ? 'On' : 'Off'}</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Property Details */}
         <View style={styles.card}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Property Details</Text>
-            <TouchableOpacity
-              style={styles.floodBadge}
-              onPress={() => { const pc = formatPostcode(inputs.postcode); if (isValidPostcode(pc)) { setDdPostcode(pc); setSoldPostcode(pc); setView('duediligence'); } }}
-              disabled={!floodRisk && !floodLoading}
-            >
-              {floodLoading ? (
-                <Text style={styles.floodBadgeText}>⏳</Text>
-              ) : floodRisk ? (
-                <Text style={styles.floodBadgeText}>
-                  {floodRisk.level === 'low' ? '🟢' : floodRisk.level === 'medium' ? '🟡' : '🔴'}
-                </Text>
-              ) : (
-                <Text style={[styles.floodBadgeText, { color: colors.textMuted }]}>💧</Text>
-              )}
-              <Text style={styles.floodBadgeLabel}>Flood</Text>
-            </TouchableOpacity>
-          </View>
+          <AccordionHeader
+            title="Property Details"
+            summary={[inputs.houseNumber, formatPostcode(inputs.postcode)].filter(Boolean).join(', ') || 'Address & listing details'}
+            open={!!openSections.property}
+            onToggle={() => toggleSection('property')}
+            right={
+              <TouchableOpacity
+                style={styles.floodBadge}
+                onPress={() => { const pc = formatPostcode(inputs.postcode); if (isValidPostcode(pc)) { setDdPostcode(pc); setSoldPostcode(pc); setView('duediligence'); } }}
+                disabled={!floodRisk && !floodLoading}
+              >
+                {floodLoading ? (
+                  <Text style={styles.floodBadgeText}>⏳</Text>
+                ) : floodRisk ? (
+                  <Text style={styles.floodBadgeText}>
+                    {floodRisk.level === 'low' ? '🟢' : floodRisk.level === 'medium' ? '🟡' : '🔴'}
+                  </Text>
+                ) : (
+                  <Text style={[styles.floodBadgeText, { color: colors.textMuted }]}>💧</Text>
+                )}
+                <Text style={styles.floodBadgeLabel}>Flood</Text>
+              </TouchableOpacity>
+            }
+          />
+          {openSections.property && (<>
           {/* House number + postcode row */}
           <View style={styles.postcodeRow}>
             <View style={{ width: '60%', paddingRight: spacing.sm }}>
               <InputField label="House No. / Name" value={inputs.houseNumber} onChangeText={set('houseNumber')} placeholder="e.g. 12" keyboardType="default" />
             </View>
             <View style={{ width: '40%' }}>
-              <InputField label="Postcode" value={inputs.postcode} onChangeText={v => { set('postcode')(v); }} placeholder="SW1A 2AA" keyboardType="default" />
+              <InputField label="Postcode" value={inputs.postcode} onChangeText={v => { set('postcode')(v); }} placeholder="SW1A 2AA" keyboardType="default" autoCapitalize="characters" />
             </View>
           </View>
           <InputField label="Listing URL" value={inputs.url} onChangeText={set('url')} placeholder="e.g. rightmove.co.uk/..." keyboardType="url" />
@@ -1295,10 +1344,18 @@ export function CalculatorScreen() {
               <InputField label="Other Rooms" value={inputs.otherRooms} onChangeText={set('otherRooms')} placeholder="e.g. 2" />
             </View>
           )}
+          </>)}
         </View>
 
         {/* Ownership toggle */}
         <View style={styles.card}>
+          <AccordionHeader
+            title="Ownership"
+            summary={inputs.ownership === 'company' ? 'Ltd Co' : `Personal (${inputs.taxBand === 'basic' ? '20' : inputs.taxBand === 'additional' ? '45' : '40'}%)`}
+            open={!!openSections.ownership}
+            onToggle={() => toggleSection('ownership')}
+          />
+          {openSections.ownership && (<>
           <View style={styles.toggleRow}>
             <View>
               <Text style={styles.label}>Ownership Structure</Text>
@@ -1344,21 +1401,37 @@ export function CalculatorScreen() {
           {inputs.ownership === 'company' && (
             <Text style={styles.taxNoteGreen}>✓ Ltd Co: mortgage interest deductible as expense. Corporation tax on profits.</Text>
           )}
+          </>)}
         </View>
 
         {/* Purchase */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Purchase Price</Text>
+          <AccordionHeader
+            title="Purchase Price"
+            summary={inputs.purchasePrice ? fmtGbp(parseFloat(inputs.purchasePrice) || 0) : 'Offer, fair value & GDV'}
+            open={!!openSections.purchase}
+            onToggle={() => toggleSection('purchase')}
+          />
+          {openSections.purchase && (<>
           <InputField label="Offer Price" value={inputs.purchasePrice} onChangeText={set('purchasePrice')} prefix="£" placeholder="e.g. 180000" />
           <InputField label="Estimated Fair Value" value={inputs.estimatedFairValue} onChangeText={set('estimatedFairValue')} prefix="£" placeholder="e.g. 200000" hint="Market value — calculates capital on purchase" />
           <InputField label="Renovated Value (GDV)" value={inputs.renovatedValue} onChangeText={set('renovatedValue')} prefix="£" placeholder="e.g. 250000" hint="Value after refurb — used in 5yr projection" />
+          </>)}
         </View>
 
         {/* Purchase costs */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Purchase Costs</Text>
+          <AccordionHeader
+            title="Purchase Costs"
+            summary={results ? `SDLT ${fmtGbp(results.stampDuty)} · Solicitor ${fmtGbp(parseFloat(inputs.solicitorFees) || 0)}` : 'SDLT & fees'}
+            open={!!openSections.purchaseCosts}
+            onToggle={() => toggleSection('purchaseCosts')}
+          />
+          {openSections.purchaseCosts && (<>
           <InputField label="Solicitor Fees" value={inputs.solicitorFees} onChangeText={set('solicitorFees')} prefix="£" />
-          <InputField label="Other Costs" value={inputs.other} onChangeText={set('other')} prefix="£" />
+          {showAdvanced && (
+            <InputField label="Other Costs" value={inputs.other} onChangeText={set('other')} prefix="£" />
+          )}
           {results && (
             <TouchableOpacity style={styles.sdltToggle} onPress={() => setShowSdlt(v => !v)}>
               <Text style={styles.sdltLabel}>SDLT (Stamp Duty): {fmtGbp(results.stampDuty)}</Text>
@@ -1373,12 +1446,20 @@ export function CalculatorScreen() {
               ))}
             </View>
           )}
+          </>)}
         </View>
 
         {/* Refurb */}
         <View style={styles.card}>
+          <AccordionHeader
+            title="Refurb"
+            summary={(() => { const rc = inputs.refurbMode === 'simple' ? parseFloat(inputs.refurbCost) || 0 : (results?.detailedRefurbTotal ?? 0); return rc > 0 ? fmtGbp(rc) : 'None'; })()}
+            open={!!openSections.refurb}
+            onToggle={() => toggleSection('refurb')}
+          />
+          {openSections.refurb && (<>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Refurb</Text>
+            <Text style={styles.label}>Costing mode</Text>
             <View style={styles.segmentRow}>
               <TouchableOpacity
                 style={[styles.segBtn, inputs.refurbMode === 'simple' && styles.segBtnActive]}
@@ -1398,7 +1479,9 @@ export function CalculatorScreen() {
           {inputs.refurbMode === 'simple' ? (
             <>
               <InputField label="Refurb Cost" value={inputs.refurbCost} onChangeText={set('refurbCost')} prefix="£" placeholder="0" />
-              <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" />
+              {showAdvanced && (
+                <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" max={100} />
+              )}
             </>
           ) : (
             <>
@@ -1416,18 +1499,31 @@ export function CalculatorScreen() {
               <InputField label="Roof" value={inputs.rd_roof} onChangeText={set('rd_roof')} prefix="£" placeholder="0" />
               <InputField label="Damp Proofing" value={inputs.rd_dampProofing} onChangeText={set('rd_dampProofing')} prefix="£" placeholder="0" />
               <CustomItemRows items={customRefurb} onChange={setCustomRefurb} placeholder="Custom item" />
-              <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" />
+              {showAdvanced && (
+                <InputField label="Contingency" value={inputs.refurbContingencyPct} onChangeText={set('refurbContingencyPct')} suffix="%" placeholder="10" max={100} />
+              )}
               {results?.detailedRefurbTotal != null && (
                 <Text style={styles.subtotal}>Subtotal (before contingency): {fmtGbp(results.detailedRefurbTotal)}</Text>
               )}
             </>
           )}
-          <InputField label="Holding Costs" value={inputs.holdingCosts} onChangeText={set('holdingCosts')} prefix="£" placeholder="0" hint="Council tax, utilities, insurance during refurb" />
+          {showAdvanced && (
+            <InputField label="Holding Costs" value={inputs.holdingCosts} onChangeText={set('holdingCosts')} prefix="£" placeholder="0" hint="Council tax, utilities, insurance during refurb" />
+          )}
+          </>)}
         </View>
 
         {/* Finance */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Finance</Text>
+          <AccordionHeader
+            title="Finance"
+            summary={inputs.refinanceAfterRefurb === 'yes'
+              ? `BRR · ${inputs.brrPurchaseMethod === 'mortgage' ? 'mortgage' : 'bridge'} purchase @ ${inputs.interestRate || '0'}%`
+              : `${inputs.depositPct || '0'}% deposit @ ${inputs.interestRate || '0'}%`}
+            open={!!openSections.finance}
+            onToggle={() => toggleSection('finance')}
+          />
+          {openSections.finance && (<>
 
           {/* Refinance after refurb toggle */}
           <View style={[styles.toggleRow, { marginBottom: spacing.sm }]}>
@@ -1482,6 +1578,8 @@ export function CalculatorScreen() {
                 <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder={inputs.purchasePrice || 'e.g. 180000'} hint="Defaults to purchase price if blank" />
               )}
               <InputField label="Duration (months)" value={inputs.bridgingDurationMonths} onChangeText={set('bridgingDurationMonths')} placeholder="6" />
+              <InputField label="Monthly Interest Rate" value={inputs.bridgingMonthlyInterestRate} onChangeText={set('bridgingMonthlyInterestRate')} suffix="% /mo" placeholder="0.75" hint="e.g. 0.75% per month" />
+              {showAdvanced && (<>
               <View style={styles.feeRow}>
                 <View style={styles.feeInput}>
                   <InputField label="Arrangement Fee" value={inputs.bridgingArrangementFee} onChangeText={set('bridgingArrangementFee')} prefix={inputs.bridgingArrangementFeeMode === 'fixed' ? '£' : undefined} suffix={inputs.bridgingArrangementFeeMode === 'pct' ? '%' : undefined} placeholder={inputs.bridgingArrangementFeeMode === 'pct' ? '2' : '0'} />
@@ -1500,15 +1598,15 @@ export function CalculatorScreen() {
                   <TouchableOpacity style={[styles.modeBtn, inputs.bridgingValuationFeeMode === 'fixed' && styles.modeBtnActive]} onPress={() => setInputs(prev => ({ ...prev, bridgingValuationFeeMode: 'fixed' }))}><Text style={[styles.modeBtnText, inputs.bridgingValuationFeeMode === 'fixed' && styles.modeBtnTextActive]}>£</Text></TouchableOpacity>
                 </View>
               </View>
-              <InputField label="Monthly Interest Rate" value={inputs.bridgingMonthlyInterestRate} onChangeText={set('bridgingMonthlyInterestRate')} suffix="% /mo" placeholder="0.75" hint="e.g. 0.75% per month" />
               <InputField label="Exit Fee" value={inputs.bridgingExitFee} onChangeText={set('bridgingExitFee')} prefix="£" placeholder="0" />
               <InputField label="Broker Fees" value={inputs.bridgingBrokerFees} onChangeText={set('bridgingBrokerFees')} prefix="£" placeholder="0" />
               <InputField label="Other Fees" value={inputs.bridgingOtherFees} onChangeText={set('bridgingOtherFees')} prefix="£" placeholder="0" />
+              </>)}
             </View>
           )}
 
           {/* BTL: mortgage valuation */}
-          {inputs.strategy === 'btl' && (
+          {showAdvanced && inputs.strategy === 'btl' && (
             <InputField
               label="Mortgage Valuation"
               value={inputs.mortgageValuation}
@@ -1555,9 +1653,11 @@ export function CalculatorScreen() {
 
           {/* Bridge-purchase has no day-1 mortgage, so no deposit % */}
           {!(inputs.refinanceAfterRefurb === 'yes' && inputs.brrPurchaseMethod !== 'mortgage') && (
-            <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" />
+            <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" min={0} max={100} />
           )}
-          <InputField label="Mortgage Arrangement Fee" value={inputs.mortgageFee} onChangeText={set('mortgageFee')} prefix="£" />
+          {showAdvanced && (
+            <InputField label="Mortgage Arrangement Fee" value={inputs.mortgageFee} onChangeText={set('mortgageFee')} prefix="£" />
+          )}
           {(() => {
             const midRate = marketData ? marketData.btlMortgageRate.value : 5.5;
             const irMin = Math.max(0.5, Math.round((midRate - 3) * 2) / 2);
@@ -1574,19 +1674,32 @@ export function CalculatorScreen() {
               />
             );
           })()}
-          <InputField label="Initial Term" value={inputs.mortgageInitialTerm} onChangeText={set('mortgageInitialTerm')} suffix="yrs" placeholder="2" hint="Fixed period before reversion" />
-          {inputs.refinanceAfterRefurb === 'yes' && (
-            <InputField label="New Mortgage LTV (after refurb)" value={inputs.newMortgagePct} onChangeText={set('newMortgagePct')} suffix="%" placeholder="75" hint="LTV on the refinanced product" />
+          {showAdvanced && (
+            <InputField label="Initial Term" value={inputs.mortgageInitialTerm} onChangeText={set('mortgageInitialTerm')} suffix="yrs" placeholder="2" hint="Fixed period before reversion" />
           )}
+          {inputs.refinanceAfterRefurb === 'yes' && (
+            <InputField label="New Mortgage LTV (after refurb)" value={inputs.newMortgagePct} onChangeText={set('newMortgagePct')} suffix="%" placeholder="75" hint="LTV on the refinanced product" max={100} />
+          )}
+          </>)}
         </View>
 
         {/* Income */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Income</Text>
+          <AccordionHeader
+            title="Income"
+            summary={inputs.strategy === 'stl'
+              ? `£${inputs.nightlyRate || '0'}/night @ ${inputs.occupancyPct || '0'}%`
+              : inputs.strategy === 'hmo'
+                ? `${inputs.hmoRooms || '0'} rooms @ £${inputs.hmoRentPerRoom || '0'}/mo`
+                : `£${inputs.rentPerMonth || '0'}/mo rent`}
+            open={!!openSections.income}
+            onToggle={() => toggleSection('income')}
+          />
+          {openSections.income && (<>
           {inputs.strategy === 'stl' ? (
             <>
               <InputField label="Nightly Rate" value={inputs.nightlyRate} onChangeText={set('nightlyRate')} prefix="£" placeholder="85" />
-              <InputField label="Occupancy" value={inputs.occupancyPct} onChangeText={set('occupancyPct')} suffix="%" placeholder="70" hint="Average % of nights booked" />
+              <InputField label="Occupancy" value={inputs.occupancyPct} onChangeText={set('occupancyPct')} suffix="%" placeholder="70" hint="Average % of nights booked" min={0} max={100} />
             </>
           ) : inputs.strategy === 'hmo' ? (
             <>
@@ -1597,12 +1710,19 @@ export function CalculatorScreen() {
           ) : (
             <InputField label="Monthly Rent" value={inputs.rentPerMonth} onChangeText={set('rentPerMonth')} prefix="£" placeholder="900" />
           )}
+          </>)}
         </View>
 
         {/* STL costs — only shown for STL strategy */}
         {inputs.strategy === 'stl' && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>STL / AirBnB Costs</Text>
+            <AccordionHeader
+              title="STL / AirBnB Costs"
+              summary="Setup & monthly running costs"
+              open={!!openSections.stratCosts}
+              onToggle={() => toggleSection('stratCosts')}
+            />
+            {openSections.stratCosts && (<>
 
             <Text style={styles.subSectionTitle}>Setup (one-time)</Text>
             <InputField label="Furnishing" value={inputs.stl_furnishing} onChangeText={set('stl_furnishing')} prefix="£" placeholder="0" />
@@ -1615,13 +1735,20 @@ export function CalculatorScreen() {
             <InputField label="Internet" value={inputs.stl_internet} onChangeText={set('stl_internet')} prefix="£" placeholder="0" />
             <InputField label="Additional Maintenance" value={inputs.stl_additionalMaintenance} onChangeText={set('stl_additionalMaintenance')} prefix="£" placeholder="0" />
             <CustomItemRows items={customStlMonthly} onChange={setCustomStlMonthly} placeholder="Monthly item" monthly />
+            </>)}
           </View>
         )}
 
         {/* HMO costs */}
         {inputs.strategy === 'hmo' && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>HMO Costs</Text>
+            <AccordionHeader
+              title="HMO Costs"
+              summary="Setup, licence & monthly running costs"
+              open={!!openSections.stratCosts}
+              onToggle={() => toggleSection('stratCosts')}
+            />
+            {openSections.stratCosts && (<>
 
             <Text style={styles.subSectionTitle}>One-Time Setup</Text>
             <InputField label="Furnishing per Room" value={inputs.hmoFurnishingPerRoom} onChangeText={set('hmoFurnishingPerRoom')} prefix="£" placeholder="1500" hint="Per room × room count" />
@@ -1650,27 +1777,46 @@ export function CalculatorScreen() {
               <InputField label="Utilities / Month" value={inputs.hmoUtilitiesMonthly} onChangeText={set('hmoUtilitiesMonthly')} prefix="£" placeholder="300" hint="Gas, electric, water, broadband combined" />
             )}
             <InputField label="Common Area Cleaning / Month" value={inputs.hmoCleaningMonthly} onChangeText={set('hmoCleaningMonthly')} prefix="£" placeholder="150" />
+            </>)}
           </View>
         )}
 
         {/* OPEX */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>General Costs</Text>
-          <InputField label="Service Charge / Ground Rent (annual)" value={inputs.serviceCharge} onChangeText={set('serviceCharge')} prefix="£" placeholder="0" />
+          <AccordionHeader
+            title="General Costs"
+            summary={`Mgmt ${inputs.mgmtFeePct || '0'}% · Maint ${inputs.maintenancePct || '0'}% · Ins ${fmtGbp(parseFloat(inputs.insurance) || 0)}/yr`}
+            open={!!openSections.opex}
+            onToggle={() => toggleSection('opex')}
+          />
+          {openSections.opex && (<>
+          {showAdvanced && (
+            <InputField label="Service Charge / Ground Rent (annual)" value={inputs.serviceCharge} onChangeText={set('serviceCharge')} prefix="£" placeholder="0" />
+          )}
           <InputField label="Buildings & Landlord Insurance (annual)" value={inputs.insurance} onChangeText={set('insurance')} prefix="£" placeholder="800" />
-          <InputField label="Management Fee" value={inputs.mgmtFeePct} onChangeText={set('mgmtFeePct')} suffix="%" placeholder="10" hint="% of rent — set 0 if self-managing" />
-          <InputField label="Maintenance Reserve" value={inputs.maintenancePct} onChangeText={set('maintenancePct')} suffix="%" placeholder="5" hint="% of rent set aside for repairs" />
+          <InputField label="Management Fee" value={inputs.mgmtFeePct} onChangeText={set('mgmtFeePct')} suffix="%" placeholder="10" hint="% of rent — set 0 if self-managing" max={100} />
+          <InputField label="Maintenance Reserve" value={inputs.maintenancePct} onChangeText={set('maintenancePct')} suffix="%" placeholder="5" hint="% of rent set aside for repairs" max={100} />
+          {showAdvanced && (<>
           <InputField label="Gas Safety Cert (annual)" value={inputs.gasCertAnnual} onChangeText={set('gasCertAnnual')} prefix="£" placeholder="60" hint="CP12 — required every year" />
           <InputField label="Electrical Safety Cert (5-yearly)" value={inputs.elecCertFiveYear} onChangeText={set('elecCertFiveYear')} prefix="£" placeholder="200" hint="EICR — cost spread over 5 years" />
+          </>)}
           {inputs.strategy !== 'hmo' && (
             <InputField label="Void Allowance (months/yr)" value={inputs.voidMonths} onChangeText={set('voidMonths')} placeholder="0.5" hint="Average empty months per year" />
           )}
+          </>)}
         </View>
 
         {/* 5yr projection */}
         <View style={styles.card}>
+          <AccordionHeader
+            title="5-Year Projection"
+            summary={`Growth ${inputs.capitalGrowthPct || '0'}% · Rent ${inputs.annualIncomeIncreasePct || '0'}%`}
+            open={!!openSections.projection}
+            onToggle={() => toggleSection('projection')}
+          />
+          {openSections.projection && (<>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>5-Year Projection</Text>
+            <Text style={styles.label}>Assumptions</Text>
             {marketData && (
               <TouchableOpacity
                 style={styles.resetBtn}
@@ -1739,12 +1885,59 @@ export function CalculatorScreen() {
               />
             );
           })()}
+          </>)}
         </View>
 
         {/* Results */}
         {results ? (
           <View style={styles.results}>
             <Text style={[styles.resultsTitle, { color: stratColor }]}>Results</Text>
+
+            {/* Hero: the three numbers that decide a deal, plus verdict chips */}
+            <View style={styles.heroCard}>
+              <View style={styles.heroRow}>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroLabel}>Cashflow</Text>
+                  <Text style={[styles.heroValue, { color: results.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>
+                    {fmtGbp(results.monthlyNetCashflow)}
+                  </Text>
+                  <Text style={styles.stickyLabel}>/mo</Text>
+                </View>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroLabel}>Cash-on-Cash</Text>
+                  <Text style={[styles.heroValue, { color: colors.text }]}>
+                    {results.allCapitalOut ? '∞' : fmtPct(results.cashOnCash, 1)}
+                  </Text>
+                  <Text style={styles.stickyLabel}>{results.allCapitalOut ? 'all capital out' : 'annual'}</Text>
+                </View>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroLabel}>Net Yield</Text>
+                  <Text style={[styles.heroValue, { color: colors.text }]}>{fmtPct(results.netYield, 1)}</Text>
+                  <Text style={styles.stickyLabel}>on price</Text>
+                </View>
+              </View>
+              <View style={styles.heroChipsRow}>
+                <View style={[styles.heroChip, { borderColor: results.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>
+                  <Text style={[styles.heroChipText, { color: results.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>
+                    {results.monthlyNetCashflow >= 0 ? '✓ Cashflow +' : '✗ Cashflow −'}
+                  </Text>
+                </View>
+                {results.icr && (
+                  <View style={[styles.heroChip, { borderColor: results.icr.pass125 ? colors.positive : colors.negative }]}>
+                    <Text style={[styles.heroChipText, { color: results.icr.pass125 ? colors.positive : colors.negative }]}>
+                      {results.icr.pass125 ? '✓' : '✗'} ICR {fmtPct(results.icr.ratio, 0)}
+                    </Text>
+                  </View>
+                )}
+                {results.tax && (
+                  <View style={[styles.heroChip, { borderColor: results.tax.postTaxMonthlyCashflow >= 0 ? colors.positive : colors.negative }]}>
+                    <Text style={[styles.heroChipText, { color: results.tax.postTaxMonthlyCashflow >= 0 ? colors.positive : colors.negative }]}>
+                      {results.tax.postTaxMonthlyCashflow >= 0 ? '✓' : '✗'} Post-tax {fmtGbp(results.tax.postTaxMonthlyCashflow)}/mo
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
 
             <SectionDivider title="Costs Summary" />
             {results.capitalOnPurchase != null && (
@@ -1896,6 +2089,26 @@ export function CalculatorScreen() {
         <View style={{ height: 16 }} />
       </ScrollView>
 
+      {/* Sticky live summary — pinned above the nav while editing */}
+      {view === 'calculator' && results && (
+        <View style={styles.stickyBar}>
+          <View style={styles.stickyStat}>
+            <Text style={styles.stickyLabel}>Cashflow</Text>
+            <Text style={[styles.stickyValue, { color: results.monthlyNetCashflow >= 0 ? colors.positive : colors.negative }]}>
+              {fmtGbp(results.monthlyNetCashflow)}/mo
+            </Text>
+          </View>
+          <View style={styles.stickyStat}>
+            <Text style={styles.stickyLabel}>CoC</Text>
+            <Text style={styles.stickyValue}>{results.allCapitalOut ? '∞' : fmtPct(results.cashOnCash, 1)}</Text>
+          </View>
+          <View style={styles.stickyStat}>
+            <Text style={styles.stickyLabel}>Net Yield</Text>
+            <Text style={styles.stickyValue}>{fmtPct(results.netYield, 1)}</Text>
+          </View>
+        </View>
+      )}
+
       {/* Bottom navigation */}
       <View style={styles.bottomNav}>
         {([
@@ -2024,6 +2237,26 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: spacing.sm },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  accHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  accSummary: { color: colors.textMuted, fontSize: font.sizes.xs, marginTop: -6, marginBottom: spacing.xs },
+  accChevron: { color: colors.textMuted, fontSize: font.sizes.md, paddingLeft: spacing.xs },
+  utilityRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  advancedPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface2 },
+  advancedPillActive: { borderColor: colors.primary, backgroundColor: colors.primaryMuted },
+  advancedPillText: { color: colors.textSecondary, fontSize: font.sizes.xs, fontWeight: '600' },
+  advancedPillTextActive: { color: colors.primary },
+  stickyBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface2, paddingVertical: 6, paddingHorizontal: spacing.sm },
+  stickyStat: { flex: 1, alignItems: 'center' },
+  stickyLabel: { color: colors.textMuted, fontSize: font.sizes.xs },
+  stickyValue: { color: colors.text, fontSize: font.sizes.sm, fontWeight: '700' },
+  heroCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, backgroundColor: colors.surface2 },
+  heroRow: { flexDirection: 'row', marginBottom: spacing.sm },
+  heroStat: { flex: 1, alignItems: 'center' },
+  heroLabel: { color: colors.textMuted, fontSize: font.sizes.xs, marginBottom: 2 },
+  heroValue: { fontSize: font.sizes.xl, fontWeight: '800', color: colors.text },
+  heroChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center' },
+  heroChip: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
+  heroChipText: { fontSize: font.sizes.xs, fontWeight: '600' },
   subSectionTitle: { color: colors.textSecondary, fontSize: font.sizes.sm, fontWeight: '600', marginBottom: spacing.xs },
   subCard: { backgroundColor: colors.surface2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.sm },
   label: { color: colors.text, fontSize: font.sizes.md, fontWeight: '600' },

@@ -11,9 +11,41 @@ interface Props {
   placeholder?: string;
   keyboardType?: 'numeric' | 'decimal-pad' | 'default' | 'url';
   hint?: string;
+  min?: number;
+  max?: number;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }
 
-export function InputField({ label, value, onChangeText, prefix, suffix, placeholder, keyboardType = 'decimal-pad', hint }: Props) {
+// Group the integer part with commas, preserving any decimal part as typed
+function fmtThousands(raw: string): string {
+  const dot = raw.indexOf('.');
+  const int = dot === -1 ? raw : raw.slice(0, dot);
+  const rest = dot === -1 ? '' : raw.slice(dot);
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + rest;
+}
+
+export function InputField({ label, value, onChangeText, prefix, suffix, placeholder, keyboardType = 'decimal-pad', hint, min, max, autoCapitalize }: Props) {
+  const isNumeric = keyboardType === 'numeric' || keyboardType === 'decimal-pad';
+  const isMoney = prefix === '£';
+
+  // £ fields display with thousands separators; state stays comma-free so every
+  // parseFloat/n() downstream keeps working
+  const display = isMoney && value ? fmtThousands(value.replace(/,/g, '')) : value;
+
+  const num = parseFloat(value.replace(/,/g, ''));
+  const outOfRange = value !== '' && !isNaN(num) &&
+    ((min != null && num < min) || (max != null && num > max));
+
+  const handleChange = (v: string) => {
+    onChangeText(isNumeric ? v.replace(/[^0-9.]/g, '') : v);
+  };
+
+  const handleEndEditing = () => {
+    if (!isNumeric || value === '' || isNaN(num)) return;
+    if (max != null && num > max) onChangeText(String(max));
+    else if (min != null && num < min) onChangeText(String(min));
+  };
+
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
@@ -21,16 +53,24 @@ export function InputField({ label, value, onChangeText, prefix, suffix, placeho
       <View style={styles.row}>
         {prefix ? <View style={styles.affix}><Text style={styles.affixText}>{prefix}</Text></View> : null}
         <TextInput
-          style={[styles.input, prefix && styles.inputWithPrefix, suffix && styles.inputWithSuffix]}
-          value={value}
-          onChangeText={onChangeText}
+          style={[styles.input, isNumeric && styles.inputNumeric, prefix && styles.inputWithPrefix, suffix && styles.inputWithSuffix, outOfRange && styles.inputError]}
+          value={display}
+          onChangeText={handleChange}
+          onEndEditing={handleEndEditing}
           keyboardType={keyboardType}
           placeholder={placeholder ?? '0'}
           placeholderTextColor={colors.textMuted}
+          autoCapitalize={autoCapitalize}
           returnKeyType="done"
         />
         {suffix ? <View style={styles.affixRight}><Text style={styles.affixText}>{suffix}</Text></View> : null}
       </View>
+      {outOfRange ? (
+        <Text style={styles.errorText}>
+          {min != null && max != null ? `Enter a value between ${min} and ${max}`
+            : max != null ? `Maximum ${max}` : `Minimum ${min}`} — will be clamped
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -53,6 +93,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  inputNumeric: { textAlign: 'right' },
+  inputError: { borderColor: colors.negative },
+  errorText: { color: colors.negative, fontSize: font.sizes.xs, marginTop: 4 },
   inputWithPrefix: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
   inputWithSuffix: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
   affix: {
