@@ -282,7 +282,8 @@ function buildHtml(
   const mortFee = parseFloat(deal.inputs.mortgageFee) || 0;
   const otherFees = parseFloat(deal.inputs.other) || 0;
   const totalFees = solicitor + mortFee + otherFees;
-  const deposit = price - results.mortgageAmount;
+  const deposit = results.deposit;
+  const ongoingMortgage = results.monthlyPostRefiMortgage ?? results.monthlyMortgage;
   const refurb = Math.max(0, results.totalInvested - results.totalPurchaseCosts - (results.initialFinancingCost ?? 0));
 
   const floodColors: Record<string, string> = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
@@ -294,7 +295,7 @@ function buildHtml(
     : 'Not assessed';
 
   const cashflowSVG = cashflowChartSVG(
-    results.monthlyGrossIncome, results.monthlyMortgage, results.monthlyOpex, results.monthlyNetCashflow,
+    results.monthlyGrossIncome, ongoingMortgage, results.monthlyOpex, results.monthlyNetCashflow,
   );
   const yieldSVG = yieldChartSVG(results.grossYield, results.netYield, results.cashOnCash);
   const capitalSVG = capitalChartSVG(deposit, results.stampDuty, totalFees, refurb);
@@ -369,13 +370,13 @@ function buildHtml(
   </div>
   <div class="kpi">
     <div class="kpi-label">Cash-on-Cash</div>
-    <div class="kpi-value">${pct(results.cashOnCash)}</div>
-    <div class="kpi-sub">annual return on cash</div>
+    <div class="kpi-value">${results.allCapitalOut ? '∞' : pct(results.cashOnCash)}</div>
+    <div class="kpi-sub">${results.allCapitalOut ? 'all capital out at refi' : 'annual return on cash'}</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Total Invested</div>
     <div class="kpi-value">${gbp(results.totalInvested)}</div>
-    <div class="kpi-sub">${isBRR && results.capitalLeftIn != null ? 'left in after refi: ' + gbp(results.capitalLeftIn) : 'all-in cost'}</div>
+    <div class="kpi-sub">${isBRR && results.capitalLeftIn != null ? 'left in after refi: ' + (results.allCapitalOut ? '£0 (all out)' : gbp(results.capitalLeftIn)) : 'all-in cost'}</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Gross Yield</div>
@@ -397,8 +398,10 @@ function buildHtml(
 <h2>Acquisition Balance Sheet</h2>
 <table>
   <tr><td>Purchase Price</td><td>${gbp(price)}</td></tr>
-  <tr class="sub"><td style="padding-left:20px">Deposit (${deal.inputs.depositPct || '25'}%)</td><td>${gbp(deposit)}</td></tr>
-  <tr class="sub"><td style="padding-left:20px">Mortgage — ${pct(100 - parseFloat(deal.inputs.depositPct || '25'), 0)} LTV @ ${deal.inputs.interestRate || '5.5'}% p.a.</td><td>${gbp(results.mortgageAmount)}</td></tr>
+  ${results.mortgageAmount > 0
+    ? `<tr class="sub"><td style="padding-left:20px">Deposit (${deal.inputs.depositPct || '25'}%)</td><td>${gbp(deposit)}</td></tr>
+  <tr class="sub"><td style="padding-left:20px">Mortgage — ${pct(100 - parseFloat(deal.inputs.depositPct || '25'), 0)} LTV @ ${deal.inputs.interestRate || '5.5'}% p.a.</td><td>${gbp(results.mortgageAmount)}</td></tr>`
+    : `<tr class="sub"><td style="padding-left:20px">Cash to Complete (bridge purchase)</td><td>${gbp(deposit)}</td></tr>`}
   <tr><td>Stamp Duty (SDLT)</td><td>${gbp(results.stampDuty)}</td></tr>
   ${sdltRows}
   <tr><td>Solicitor / Legal Fees</td><td>${gbp(solicitor)}</td></tr>
@@ -413,7 +416,7 @@ function buildHtml(
 <h2>Monthly Profit &amp; Loss</h2>
 <table>
   <tr><td>Gross Rental Income</td><td>${gbp(results.monthlyGrossIncome)}</td></tr>
-  <tr class="sub"><td style="padding-left:20px">Mortgage (interest only)</td><td style="color:#ef4444">(${gbp(results.monthlyMortgage)})</td></tr>
+  <tr class="sub"><td style="padding-left:20px">Mortgage (interest only${isBRR ? ', post-refi' : ''})</td><td style="color:#ef4444">(${gbp(ongoingMortgage)})</td></tr>
   <tr class="sub"><td style="padding-left:20px">Operating Expenses</td><td style="color:#f59e0b">(${gbp(results.monthlyOpex)})</td></tr>
   <tr class="total"><td>Net Monthly Cashflow</td><td style="color:${results.monthlyNetCashflow < 0 ? '#dc2626' : '#166534'}">${results.monthlyNetCashflow < 0 ? '−' : ''}${gbp(Math.abs(results.monthlyNetCashflow))}</td></tr>
   <tr class="sub"><td style="padding-left:20px">Annual Net Cashflow</td><td>${gbp(results.annualNetCashflow)}</td></tr>

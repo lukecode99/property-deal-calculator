@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Platform, Share, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, radius, font } from '../theme';
 import { DealInputs, DealExtras, Strategy, Ownership, RefurbMode, FeeMode, DEFAULT_INPUTS } from '../types';
 import { calcDeal } from '../engine/dealEngine';
@@ -38,6 +39,7 @@ interface SavedDeal {
   strategy: Strategy;
   totalInvested: number;
   capitalLeftIn?: number;
+  allCapitalOut?: boolean;
   cashOnCash: number;
   monthlyNetCashflow: number;
   grossYield: number;
@@ -131,8 +133,12 @@ function CustomItemRows({
   );
 }
 
+const STORE_DEALS = 'pdc:savedDeals:v1';
+const STORE_INPUTS = 'pdc:lastInputs:v1';
+
 export function CalculatorScreen() {
   const [inputs, setInputs] = useState<DealInputs>(DEFAULT_INPUTS);
+  const [hydrated, setHydrated] = useState(false);
   const [showSdlt, setShowSdlt] = useState(false);
   const [showStress, setShowStress] = useState(false);
   const [showProjection, setShowProjection] = useState(false);
@@ -143,6 +149,40 @@ export function CalculatorScreen() {
   const [savedDeals, setSavedDeals] = useState<SavedDeal[]>([]);
   const [editingDealId, setEditingDealId] = useState<number | null>(null);
   const [view, setView] = useState<'calculator' | 'duediligence' | 'saved' | 'guide'>('calculator');
+
+  // Restore saved deals + last inputs on launch. Merging over DEFAULT_INPUTS
+  // keeps deals/inputs stored by older builds valid when new fields are added.
+  useEffect(() => {
+    (async () => {
+      try {
+        const [dealsRaw, inputsRaw] = await Promise.all([
+          AsyncStorage.getItem(STORE_DEALS),
+          AsyncStorage.getItem(STORE_INPUTS),
+        ]);
+        if (dealsRaw) {
+          const deals = JSON.parse(dealsRaw) as SavedDeal[];
+          setSavedDeals(deals.map(d => ({ ...d, inputs: { ...DEFAULT_INPUTS, ...d.inputs } })));
+        }
+        if (inputsRaw) setInputs({ ...DEFAULT_INPUTS, ...JSON.parse(inputsRaw) });
+      } catch {
+        // corrupt store — start fresh rather than crash
+      }
+      setHydrated(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    AsyncStorage.setItem(STORE_DEALS, JSON.stringify(savedDeals)).catch(() => {});
+  }, [savedDeals, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => {
+      AsyncStorage.setItem(STORE_INPUTS, JSON.stringify(inputs)).catch(() => {});
+    }, 400); // debounce — inputs change per keystroke
+    return () => clearTimeout(t);
+  }, [inputs, hydrated]);
   const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'schools'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
@@ -496,6 +536,7 @@ export function CalculatorScreen() {
         strategy: inputs.strategy,
         totalInvested: results.totalInvested,
         capitalLeftIn: results.capitalLeftIn,
+        allCapitalOut: results.allCapitalOut,
         cashOnCash: results.cashOnCash,
         monthlyNetCashflow: results.monthlyNetCashflow,
         grossYield: results.grossYield,
@@ -520,6 +561,7 @@ export function CalculatorScreen() {
       strategy: inputs.strategy,
       totalInvested: results.totalInvested,
       capitalLeftIn: results.capitalLeftIn,
+      allCapitalOut: results.allCapitalOut,
       cashOnCash: results.cashOnCash,
       monthlyNetCashflow: results.monthlyNetCashflow,
       grossYield: results.grossYield,
@@ -541,11 +583,16 @@ export function CalculatorScreen() {
   }
 
   function shareDealReport(deal: SavedDeal) {
-    const stratColors: Record<string, string> = {
-      BTL: '#3B82F6', BRRR: '#8B5CF6', HMO: '#F59E0B', STL: '#10B981', FLIP: '#EF4444',
-    };
-    const color = stratColors[deal.strategy] || '#3B82F6';
+    const isBRR = deal.strategy === 'btl' && deal.inputs.refinanceAfterRefurb === 'yes';
+    const color = isBRR ? '#8B5CF6' : (STRATEGIES.find(s => s.key === deal.strategy)?.color ?? '#3B82F6');
     const f = (n: number, d = 0) => n.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const num = (s: string) => parseFloat((s || '0').replace(/,/g, '')) || 0;
+    // Monthly income as the engine sees it for this strategy
+    const monthlyIncome = deal.strategy === 'stl'
+      ? num(deal.inputs.nightlyRate) * 30.4 * (num(deal.inputs.occupancyPct) / 100)
+      : deal.strategy === 'hmo'
+        ? Math.max(1, num(deal.inputs.hmoRooms) || 1) * num(deal.inputs.hmoRentPerRoom) * (1 - num(deal.inputs.hmoVoidWeeksPerRoom) / 52)
+        : num(deal.inputs.rentPerMonth);
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deal: ${deal.label}</title>
 <style>
   body { font-family: -apple-system, sans-serif; margin: 0; padding: 24px; color: #1a1a2e; }
@@ -562,16 +609,16 @@ export function CalculatorScreen() {
   footer { margin-top: 24px; font-size: 11px; color: #aaa; text-align: center; }
 </style></head><body>
 <h1>${deal.label}</h1>
-<span class="badge">${deal.strategy}</span>
+<span class="badge">${deal.strategy.toUpperCase()}${isBRR ? ' · BRR' : ''}</span>
 <div class="grid">
   <div class="card"><div class="card-label">Monthly Cash Flow</div><div class="card-value">£${f(deal.monthlyNetCashflow)}</div><div class="card-sub">net / month</div></div>
-  <div class="card"><div class="card-label">Cash-on-Cash Return</div><div class="card-value">${f(deal.cashOnCash, 1)}%</div><div class="card-sub">annual yield on cash</div></div>
+  <div class="card"><div class="card-label">Cash-on-Cash Return</div><div class="card-value">${deal.allCapitalOut ? '∞' : f(deal.cashOnCash, 1) + '%'}</div><div class="card-sub">${deal.allCapitalOut ? 'all capital out' : 'annual yield on cash'}</div></div>
   <div class="card"><div class="card-label">Total Invested</div><div class="card-value">£${f(deal.totalInvested)}</div><div class="card-sub">inc. all costs</div></div>
-  <div class="card"><div class="card-label">${deal.strategy === 'BRRR' ? 'Capital Left In' : 'Gross Yield'}</div><div class="card-value">${deal.strategy === 'BRRR' ? '£' + f(deal.capitalLeftIn ?? 0) : f(deal.grossYield, 1) + '%'}</div></div>
+  <div class="card"><div class="card-label">${isBRR ? 'Capital Left In' : 'Gross Yield'}</div><div class="card-value">${isBRR ? (deal.allCapitalOut ? '£0 — all out' : '£' + f(deal.capitalLeftIn ?? 0)) : f(deal.grossYield, 1) + '%'}</div></div>
 </div>
 <div class="section">
-  <div class="row"><span>Purchase Price</span><span>£${f(Number(deal.inputs.purchasePrice) || 0)}</span></div>
-  <div class="row"><span>Monthly Rent</span><span>£${f(Number(deal.inputs.monthlyRent) || 0)}</span></div>
+  <div class="row"><span>Purchase Price</span><span>£${f(num(deal.inputs.purchasePrice))}</span></div>
+  <div class="row"><span>Monthly ${deal.strategy === 'stl' ? 'Income (est.)' : 'Rent'}</span><span>£${f(monthlyIncome)}</span></div>
   <div class="row"><span>Monthly Mortgage</span><span>£${f(deal.monthlyMortgage)}</span></div>
   <div class="row"><span>Net Yield</span><span>${f(deal.netYield, 1)}%</span></div>
   <div class="row"><span>Stamp Duty</span><span>£${f(deal.stampDuty)}</span></div>
@@ -1033,9 +1080,10 @@ export function CalculatorScreen() {
         {view === 'guide' && (
           <View>
             <View style={styles.guideSection}>
-              <Text style={styles.guideHeading}>SDLT — Additional Dwelling (2025)</Text>
+              <Text style={styles.guideHeading}>SDLT — Additional Dwelling (from Apr 2025)</Text>
               <Text style={styles.guideBody}>5% surcharge applies to all investment properties on top of standard rates:</Text>
-              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£0–£250k</Text><Text style={styles.guidePillVal}>5%</Text></View>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£0–£125k</Text><Text style={styles.guidePillVal}>5%</Text></View>
+              <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£125k–£250k</Text><Text style={styles.guidePillVal}>7%</Text></View>
               <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£250k–£925k</Text><Text style={styles.guidePillVal}>10%</Text></View>
               <View style={styles.guidePill}><Text style={styles.guidePillLabel}>£925k–£1.5m</Text><Text style={styles.guidePillVal}>15%</Text></View>
               <View style={styles.guidePill}><Text style={styles.guidePillLabel}>Over £1.5m</Text><Text style={styles.guidePillVal}>17%</Text></View>
@@ -1099,7 +1147,7 @@ export function CalculatorScreen() {
                             </View>
                             <View style={styles.dealCardRow}>
                               <Text style={styles.dealCardKey}>CoC return</Text>
-                              <Text style={[styles.dealCardVal, { color: deal.cashOnCash >= 0 ? colors.positive : colors.negative, fontSize: font.sizes.sm }]}>{fmtPct(deal.cashOnCash)}</Text>
+                              <Text style={[styles.dealCardVal, { color: deal.allCapitalOut || deal.cashOnCash >= 0 ? colors.positive : colors.negative, fontSize: font.sizes.sm }]}>{deal.allCapitalOut ? '∞' : fmtPct(deal.cashOnCash)}</Text>
                             </View>
                             <View style={styles.dealCardRow}>
                               <Text style={styles.dealCardKey}>Net yield</Text>
@@ -1137,11 +1185,11 @@ export function CalculatorScreen() {
                         </View>
                         <View style={styles.dealCardRow}>
                           <Text style={styles.dealCardKey}>Cash left in</Text>
-                          <Text style={styles.dealCardVal}>{fmtGbp(deal.capitalLeftIn ?? deal.totalInvested)}</Text>
+                          <Text style={styles.dealCardVal}>{deal.allCapitalOut ? '£0 — all out' : fmtGbp(deal.capitalLeftIn ?? deal.totalInvested)}</Text>
                         </View>
                         <View style={styles.dealCardRow}>
                           <Text style={styles.dealCardKey}>Return on capital</Text>
-                          <Text style={[styles.dealCardVal, { color: deal.cashOnCash >= 0 ? colors.positive : colors.negative }]}>{fmtPct(deal.cashOnCash)}</Text>
+                          <Text style={[styles.dealCardVal, { color: deal.allCapitalOut || deal.cashOnCash >= 0 ? colors.positive : colors.negative }]}>{deal.allCapitalOut ? '∞' : fmtPct(deal.cashOnCash)}</Text>
                         </View>
                         <View style={styles.dealCardRow}>
                           <Text style={styles.dealCardKey}>Cashflow</Text>
@@ -1272,7 +1320,26 @@ export function CalculatorScreen() {
             </View>
           </View>
           {inputs.ownership === 'personal' && (
-            <Text style={styles.taxNote}>⚠️ Section 24: mortgage interest not fully deductible. Higher-rate taxpayers pay more tax.</Text>
+            <>
+              <Text style={styles.taxNote}>⚠️ Section 24: mortgage interest not fully deductible. Higher-rate taxpayers pay more tax.</Text>
+              <View style={[styles.toggleRow, { marginTop: spacing.sm }]}>
+                <View>
+                  <Text style={styles.label}>Income Tax Band</Text>
+                  <Text style={styles.hint}>Your marginal rate on rental profit</Text>
+                </View>
+                <View style={styles.segmentRow}>
+                  {([['basic', '20%'], ['higher', '40%'], ['additional', '45%']] as const).map(([band, label]) => (
+                    <TouchableOpacity
+                      key={band}
+                      style={[styles.segBtn, inputs.taxBand === band && styles.segBtnActive]}
+                      onPress={() => setInputs(prev => ({ ...prev, taxBand: band }))}
+                    >
+                      <Text style={[styles.segBtnText, inputs.taxBand === band && styles.segBtnTextActive]}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </>
           )}
           {inputs.ownership === 'company' && (
             <Text style={styles.taxNoteGreen}>✓ Ltd Co: mortgage interest deductible as expense. Corporation tax on profits.</Text>
@@ -1381,11 +1448,39 @@ export function CalculatorScreen() {
             </View>
           </View>
 
+          {/* BRR: how the purchase itself is funded */}
+          {inputs.refinanceAfterRefurb === 'yes' && (
+            <View style={[styles.toggleRow, { marginBottom: spacing.sm }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Purchase method</Text>
+                <Text style={styles.hint}>Bridge = no day-1 mortgage</Text>
+              </View>
+              <View style={styles.segmentRow}>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.brrPurchaseMethod !== 'mortgage' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, brrPurchaseMethod: 'bridge' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.brrPurchaseMethod !== 'mortgage' && styles.segBtnTextActive]}>Bridge</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segBtn, inputs.brrPurchaseMethod === 'mortgage' && styles.segBtnActive]}
+                  onPress={() => setInputs(prev => ({ ...prev, brrPurchaseMethod: 'mortgage' }))}
+                >
+                  <Text style={[styles.segBtnText, inputs.brrPurchaseMethod === 'mortgage' && styles.segBtnTextActive]}>Mortgage</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* Initial Financing (inline, when refinancing — bridging only) */}
           {inputs.refinanceAfterRefurb === 'yes' && (
             <View style={styles.subCard}>
               <Text style={styles.subSectionTitle}>Initial / Bridging Finance</Text>
-              <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder={inputs.purchasePrice || 'e.g. 180000'} hint="Defaults to purchase price if blank" />
+              {inputs.brrPurchaseMethod === 'mortgage' ? (
+                <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder="0" hint="Refurb funding only — defaults to £0" />
+              ) : (
+                <InputField label="Loan Amount" value={inputs.bridgingAmount} onChangeText={set('bridgingAmount')} prefix="£" placeholder={inputs.purchasePrice || 'e.g. 180000'} hint="Defaults to purchase price if blank" />
+              )}
               <InputField label="Duration (months)" value={inputs.bridgingDurationMonths} onChangeText={set('bridgingDurationMonths')} placeholder="6" />
               <View style={styles.feeRow}>
                 <View style={styles.feeInput}>
@@ -1458,7 +1553,10 @@ export function CalculatorScreen() {
             />
           )}
 
-          <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" />
+          {/* Bridge-purchase has no day-1 mortgage, so no deposit % */}
+          {!(inputs.refinanceAfterRefurb === 'yes' && inputs.brrPurchaseMethod !== 'mortgage') && (
+            <InputField label="Deposit %" value={inputs.depositPct} onChangeText={set('depositPct')} suffix="%" placeholder="25" />
+          )}
           <InputField label="Mortgage Arrangement Fee" value={inputs.mortgageFee} onChangeText={set('mortgageFee')} prefix="£" />
           {(() => {
             const midRate = marketData ? marketData.btlMortgageRate.value : 5.5;
@@ -1657,7 +1755,10 @@ export function CalculatorScreen() {
                 negative={results.capitalOnPurchase < 0}
               />
             )}
-            <ResultRow label="Deposit" value={fmtGbp(parseFloat(inputs.purchasePrice.replace(/,/g, '') || '0') * parseFloat(inputs.depositPct || '0') / 100)} />
+            <ResultRow
+              label={inputs.refinanceAfterRefurb === 'yes' && inputs.brrPurchaseMethod !== 'mortgage' ? 'Cash to Complete' : 'Deposit'}
+              value={fmtGbp(results.deposit)}
+            />
             <ResultRow label="Stamp Duty (SDLT)" value={fmtGbp(results.stampDuty)} />
             <ResultRow label="Total Purchase Costs" value={fmtGbp(results.totalPurchaseCosts)} />
             {inputs.strategy === 'stl' && results.stlSetupCost > 0 && (
@@ -1681,6 +1782,14 @@ export function CalculatorScreen() {
                 muted
               />
             )}
+            {results.icr && (
+              <>
+                <SectionDivider title={`Lender ICR (stress @ ${results.icr.stressRate.toFixed(1)}%)`} />
+                <ResultRow label="Interest Coverage" value={fmtPct(results.icr.ratio, 0)} highlight={results.icr.pass145} negative={!results.icr.pass125} />
+                <ResultRow label="125% test (basic rate / ltd co)" value={results.icr.pass125 ? '✓ Pass' : '✗ Fail'} highlight={results.icr.pass125} negative={!results.icr.pass125} />
+                <ResultRow label="145% test (higher rate)" value={results.icr.pass145 ? '✓ Pass' : '✗ Fail'} highlight={results.icr.pass145} negative={!results.icr.pass145} />
+              </>
+            )}
 
             {inputs.refinanceAfterRefurb === 'yes' && results.initialFinancingCost != null && (
               <>
@@ -1696,14 +1805,17 @@ export function CalculatorScreen() {
               <>
                 <SectionDivider title="BRR — Refinance" />
                 <ResultRow label="New Mortgage (after refurb)" value={fmtGbp(results.newMortgageAmount)} />
+                {results.monthlyPostRefiMortgage != null && (
+                  <ResultRow label="Monthly Payment (post-refi)" value={fmtGbp(results.monthlyPostRefiMortgage)} />
+                )}
                 <ResultRow label="Capital Extracted" value={fmtGbp(results.valueExtracted ?? 0)} highlight={(results.valueExtracted ?? 0) > 0} negative={(results.valueExtracted ?? 0) < 0} />
-                <ResultRow label="Capital Left In" value={fmtGbp(results.capitalLeftIn ?? 0)} highlight />
+                <ResultRow label="Capital Left In" value={results.allCapitalOut ? '£0 — all capital out' : fmtGbp(results.capitalLeftIn ?? 0)} highlight />
               </>
             )}
 
             <SectionDivider title="Cashflow" />
             <ResultRow label="Monthly Gross Income" value={fmtGbp(results.monthlyGrossIncome)} />
-            <ResultRow label="Monthly Mortgage" value={fmtGbp(-results.monthlyMortgage)} negative />
+            <ResultRow label="Monthly Mortgage" value={fmtGbp(-(results.monthlyPostRefiMortgage ?? results.monthlyMortgage))} negative />
             <ResultRow label="Monthly OPEX" value={fmtGbp(-results.monthlyOpex)} negative />
             {inputs.strategy === 'stl' && results.stlMonthlyCosts > 0 && (
               <ResultRow label="  STL Running Costs" value={fmtGbp(-results.stlMonthlyCosts)} negative indent muted />
@@ -1717,9 +1829,18 @@ export function CalculatorScreen() {
             <SectionDivider title="Returns" />
             <ResultRow label="Gross Yield" value={fmtPct(results.grossYield)} />
             <ResultRow label="Net Yield" value={fmtPct(results.netYield)} highlight={results.netYield > 4} negative={results.netYield < 0} />
-            <ResultRow label="Cash-on-Cash Return" value={fmtPct(results.cashOnCash)} highlight={results.cashOnCash > 6} negative={results.cashOnCash < 0} />
-            <ResultRow label="Cash Left In" value={fmtGbp(results.capitalLeftIn ?? results.totalInvested)} highlight />
+            <ResultRow label="Cash-on-Cash Return" value={results.allCapitalOut ? '∞ — all capital out' : fmtPct(results.cashOnCash)} highlight={results.allCapitalOut || results.cashOnCash > 6} negative={!results.allCapitalOut && results.cashOnCash < 0} />
+            <ResultRow label="Cash Left In" value={results.allCapitalOut ? '£0 — all capital out' : fmtGbp(results.capitalLeftIn ?? results.totalInvested)} highlight />
             <ResultRow label="5yr Total Return" value={fmtGbp(results.projection5yr.totalReturn)} highlight={results.projection5yr.totalReturn > 0} negative={results.projection5yr.totalReturn < 0} />
+
+            {results.tax && (
+              <>
+                <SectionDivider title={`Post-Tax (${inputs.ownership === 'company' ? 'Ltd Co' : `personal, ${inputs.taxBand === 'basic' ? '20%' : inputs.taxBand === 'additional' ? '45%' : '40%'} band`})`} />
+                <ResultRow label="Est. Annual Tax" value={fmtGbp(-results.tax.annualTax)} negative={results.tax.annualTax > 0} />
+                <ResultRow label="Post-Tax Monthly Cashflow" value={fmtGbp(results.tax.postTaxMonthlyCashflow)} highlight={results.tax.postTaxMonthlyCashflow > 0} negative={results.tax.postTaxMonthlyCashflow < 0} />
+                <ResultRow label="Post-Tax Cash-on-Cash" value={results.allCapitalOut ? '∞ — all capital out' : fmtPct(results.tax.postTaxCoC)} highlight={results.allCapitalOut || results.tax.postTaxCoC > 4} negative={!results.allCapitalOut && results.tax.postTaxCoC < 0} />
+              </>
+            )}
 
             {/* Stress test */}
             <TouchableOpacity style={styles.expandRow} onPress={() => setShowStress(v => !v)}>
