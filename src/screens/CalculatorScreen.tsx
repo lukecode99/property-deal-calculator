@@ -1357,7 +1357,7 @@ export function CalculatorScreen() {
           />
           {openSections.ownership && (<>
           <View style={styles.toggleRow}>
-            <View>
+            <View style={styles.toggleLabelCol}>
               <Text style={styles.label}>Ownership Structure</Text>
               <Text style={styles.hint}>Affects Section 24 tax treatment</Text>
             </View>
@@ -1380,7 +1380,7 @@ export function CalculatorScreen() {
             <>
               <Text style={styles.taxNote}>⚠️ Section 24: mortgage interest not fully deductible. Higher-rate taxpayers pay more tax.</Text>
               <View style={[styles.toggleRow, { marginTop: spacing.sm }]}>
-                <View>
+                <View style={styles.toggleLabelCol}>
                   <Text style={styles.label}>Income Tax Band</Text>
                   <Text style={styles.hint}>Your marginal rate on rental profit</Text>
                 </View>
@@ -2236,7 +2236,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   sectionTitle: { color: colors.text, fontSize: font.sizes.md, fontWeight: '700', marginBottom: spacing.sm },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', rowGap: spacing.xs, marginBottom: spacing.sm },
   accHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   accSummary: { color: colors.textMuted, fontSize: font.sizes.xs, marginTop: -6, marginBottom: spacing.xs },
   accChevron: { color: colors.textMuted, fontSize: font.sizes.md, paddingLeft: spacing.xs },
@@ -2265,10 +2265,13 @@ const styles = StyleSheet.create({
 
   resetBtn: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryMuted },
   resetBtnText: { color: colors.primary, fontSize: font.sizes.xs, fontWeight: '600' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  // flexWrap lets segmentRow drop below the label on narrow screens (PDC-10)
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', rowGap: spacing.xs, marginBottom: spacing.sm },
+  toggleLabelCol: { flexShrink: 1, minWidth: 0, paddingRight: spacing.sm },
   segmentRow: { flexDirection: 'row', gap: spacing.xs },
   segBtn: {
     paddingHorizontal: spacing.sm, paddingVertical: 6,
+    minHeight: 44, justifyContent: 'center',
     borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
     backgroundColor: colors.surface2,
   },
