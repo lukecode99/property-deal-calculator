@@ -4,6 +4,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { colors, spacing, radius, font } from '../theme';
 import { DealInputs, DealExtras, Strategy, Ownership, RefurbMode, FeeMode, DEFAULT_INPUTS } from '../types';
 import { calcDeal } from '../engine/dealEngine';
@@ -446,15 +448,16 @@ export function CalculatorScreen() {
       .finally(() => setPlanningLoading(false));
   }
 
-  function exportCSV() {
+  async function exportCSV() {
     if (savedDeals.length === 0) return;
 
     const g = (v: number) => String(Math.round(v));
     const pct = (v: number) => v.toFixed(2);
+    const exportDate = new Date().toISOString().slice(0, 10);
 
     const headers = [
       // ── Inputs ─────────────────────────────────────────────
-      'Label', 'Strategy', 'Ownership',
+      'Label', 'Address', 'Postcode', 'Export Date', 'Strategy', 'Ownership',
       'Purchase Price', 'Fair Value', 'Renovated Value', 'EPC Rating', 'Bedrooms',
       'Solicitor Fees', 'Mortgage Fee', 'Other Costs',
       'Refurb Cost', 'Refurb Contingency %', 'Holding Costs',
@@ -467,8 +470,11 @@ export function CalculatorScreen() {
       'Stamp Duty (SDLT)', 'Deposit Amount', 'Mortgage Amount',
       'Monthly Mortgage (loan × rate ÷ 12)',
       'Total Purchase Costs (deposit + SDLT + solicitor + fee + other)',
-      'Total Invested (purchase costs + refurb + holding)',
+      'Total Invested (purchase costs + refurb + holding + STL/HMO setup + initial financing)',
       'Capital on Purchase (fair value − price)',
+      // ── BRR / refinance ────────────────────────────────────
+      'New Mortgage Amount (BRR)', 'Post-Refi Monthly Mortgage (BRR)',
+      'Value Extracted (BRR)', 'Capital Left In (BRR)', 'All Capital Out (BRR)',
       // ── Income & cashflow ──────────────────────────────────
       'Monthly Gross Income', 'Monthly OPEX',
       'Monthly Net Cashflow (gross − mortgage − OPEX)',
@@ -477,6 +483,12 @@ export function CalculatorScreen() {
       'Gross Yield % (annual gross ÷ price × 100)',
       'Net Yield % (annual net ÷ price × 100)',
       'Cash-on-Cash % (annual net ÷ invested × 100)',
+      // ── Tax ────────────────────────────────────────────────
+      'Taxable Profit (annual)', 'Annual Tax',
+      'Post-Tax Monthly Cashflow', 'Post-Tax CoC %',
+      // ── Lender ICR ─────────────────────────────────────────
+      'ICR % (rent ÷ stressed payment)', 'ICR Stress Rate %',
+      'ICR Pass 125%', 'ICR Pass 145%',
       // ── Stress tests ───────────────────────────────────────
       'Stress: Rent −10% (monthly cashflow)',
       'Stress: Rate at Future Rate (monthly cashflow)',
@@ -490,10 +502,9 @@ export function CalculatorScreen() {
 
     const rows = savedDeals.map(d => {
       const r = calcDeal(d.inputs);
-      const price = parseFloat(d.inputs.purchasePrice.replace(/,/g, '')) || 0;
-      const depositAmt = r ? price - r.mortgageAmount : 0;
       return [
-        d.label, d.strategy, d.inputs.ownership,
+        d.label, d.inputs.houseNumber || '', d.inputs.postcode || '', exportDate,
+        d.strategy, d.inputs.ownership,
         d.inputs.purchasePrice, d.inputs.estimatedFairValue || '', d.inputs.renovatedValue || '',
         d.inputs.epcRating || '', d.inputs.bedrooms || '',
         d.inputs.solicitorFees, d.inputs.mortgageFee, d.inputs.other,
@@ -507,12 +518,20 @@ export function CalculatorScreen() {
         d.inputs.capitalGrowthPct || '', d.inputs.annualIncomeIncreasePct || '',
         // Computed
         r ? g(r.stampDuty) : g(d.stampDuty),
-        g(depositAmt),
+        // Engine deposit — for BRR bridge purchases this is price − bridge loan,
+        // not price − mortgage (mortgageAmount is 0 on a bridge purchase)
+        r ? g(r.deposit) : '',
         r ? g(r.mortgageAmount) : '',
         r ? g(r.monthlyMortgage) : g(d.monthlyMortgage),
         r ? g(r.totalPurchaseCosts) : '',
         r ? g(r.totalInvested) : g(d.totalInvested),
         r?.capitalOnPurchase != null ? g(r.capitalOnPurchase) : '',
+        // BRR / refinance
+        r?.newMortgageAmount != null ? g(r.newMortgageAmount) : '',
+        r?.monthlyPostRefiMortgage != null ? g(r.monthlyPostRefiMortgage) : '',
+        r?.valueExtracted != null ? g(r.valueExtracted) : '',
+        r?.capitalLeftIn != null ? g(r.capitalLeftIn) : '',
+        r?.allCapitalOut != null ? (r.allCapitalOut ? 'Yes' : 'No') : '',
         r ? g(r.monthlyGrossIncome) : '',
         r ? g(r.monthlyOpex) : '',
         r ? g(r.monthlyNetCashflow) : g(d.monthlyNetCashflow),
@@ -520,6 +539,16 @@ export function CalculatorScreen() {
         r ? pct(r.grossYield) : pct(d.grossYield),
         r ? pct(r.netYield) : pct(d.netYield),
         r ? pct(r.cashOnCash) : pct(d.cashOnCash),
+        // Tax
+        r?.tax ? g(r.tax.taxableProfit) : '',
+        r?.tax ? g(r.tax.annualTax) : '',
+        r?.tax ? g(r.tax.postTaxMonthlyCashflow) : '',
+        r?.tax ? pct(r.tax.postTaxCoC) : '',
+        // Lender ICR
+        r?.icr ? pct(r.icr.ratio) : '',
+        r?.icr ? pct(r.icr.stressRate) : '',
+        r?.icr ? (r.icr.pass125 ? 'Pass' : 'Fail') : '',
+        r?.icr ? (r.icr.pass145 ? 'Pass' : 'Fail') : '',
         r ? g(r.stress.rent10pctDrop) : '',
         r ? g(r.stress.ratesAtFutureRate) : '',
         r ? g(r.stress.void4weeks) : '',
@@ -534,6 +563,19 @@ export function CalculatorScreen() {
     const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
 
     if (Platform.OS !== 'web') {
+      try {
+        const fileUri = FileSystem.cacheDirectory + 'property-deals.csv';
+        await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'text/csv',
+            dialogTitle: 'Export property deals',
+            UTI: 'public.comma-separated-values-text',
+          });
+          return;
+        }
+      } catch {}
+      // Fallback if the file write or share sheet fails
       Share.share({ message: csv, title: 'property-deals.csv' }).catch(() => {});
       return;
     }
