@@ -12,7 +12,7 @@ import { calcDeal } from '../engine/dealEngine';
 import { InputField } from '../components/InputField';
 import { SliderField } from '../components/SliderField';
 import { ResultRow, SectionDivider, fmtGbp, fmtPct } from '../components/ResultRow';
-import { generateAndShareDealPDF } from '../utils/generateDealReport';
+import { generateAndShareDealPDF, generateAndShareMultiDealPDF } from '../utils/generateDealReport';
 
 interface ForwardRateTenor { baseRate: number; btlRate: number; }
 interface MarketData {
@@ -560,7 +560,13 @@ export function CalculatorScreen() {
       ].map(v => `"${String(v).replace(/"/g, '""')}"`);
     });
 
-    const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
+    // Metadata row above the headers so exports are self-describing
+    const metaRow = [
+      'Property Deal Calculator',
+      `Exported ${exportDate}`,
+      `${savedDeals.length} deal${savedDeals.length !== 1 ? 's' : ''}`,
+    ].map(v => `"${v}"`).join(',');
+    const csv = [metaRow, headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n');
 
     if (Platform.OS !== 'web') {
       try {
@@ -645,6 +651,16 @@ export function CalculatorScreen() {
     setInputs({ ...deal.inputs });
     setEditingDealId(deal.id);
     setView('calculator');
+  }
+
+  function shareAllDealReports() {
+    if (savedDeals.length === 0) return;
+    generateAndShareMultiDealPDF(savedDeals).catch(() => {
+      Share.share({
+        message: `${savedDeals.length} saved deal${savedDeals.length !== 1 ? 's' : ''} — open the app to view the full reports.`,
+        title: 'Deal reports',
+      }).catch(() => {});
+    });
   }
 
   function shareDealReport(deal: SavedDeal) {
@@ -1188,9 +1204,16 @@ export function CalculatorScreen() {
               <>
                 <View style={[styles.sectionHeaderRow, { marginBottom: spacing.sm }]}>
                   <Text style={styles.sectionTitle}>{savedDeals.length} deal{savedDeals.length !== 1 ? 's' : ''} saved</Text>
-                  <TouchableOpacity style={styles.csvBtn} onPress={exportCSV}>
-                    <Text style={styles.csvBtnText}>Export CSV</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                    {Platform.OS !== 'web' && (
+                      <TouchableOpacity style={styles.csvBtn} onPress={shareAllDealReports}>
+                        <Text style={styles.csvBtnText}>Share PDF</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={styles.csvBtn} onPress={exportCSV}>
+                      <Text style={styles.csvBtnText}>Export CSV</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {savedDeals.length >= 2 && (

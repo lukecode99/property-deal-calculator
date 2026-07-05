@@ -297,9 +297,14 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     const yrCapitalGrowth = baseValueForGrowth * (Math.pow(1 + growth, yr) - 1);
     projectionYears.push({
       year: yr,
+      grossIncome: adjIncome * 12,
+      mortgage: yrMortgage * 12,
+      opex: adjOpex * 12,
+      netCashflow: adjNet,
       cumulativeCashflow,
       capitalGrowth: yrCapitalGrowth,
       totalReturn: yrCapitalGrowth + cumulativeCashflow,
+      estimatedValue: baseValueForGrowth * Math.pow(1 + growth, yr),
     });
   }
 

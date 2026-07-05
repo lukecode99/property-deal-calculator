@@ -210,9 +210,14 @@ export interface DealResults {
     // income/mortgage glide path — cumulative as at the end of each year
     years: {
       year: number;
+      grossIncome: number;        // annual, after income increase
+      mortgage: number;           // annual, at that year's rate (initial term vs future)
+      opex: number;               // annual
+      netCashflow: number;        // annual
       cumulativeCashflow: number;
       capitalGrowth: number;
       totalReturn: number;
+      estimatedValue: number;     // property value at end of year
     }[];
   };
 }

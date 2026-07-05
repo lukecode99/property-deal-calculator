@@ -269,11 +269,95 @@ function soldPricesHtml(sales: SoldSale[]): string {
   </table>`;
 }
 
-function buildHtml(
+const APP_NAME = 'Property Deal Calculator';
+const APP_URL = 'lukecode99.github.io/property-deal-calculator';
+
+// Benchmarks the verdict banner scores against
+function benchmarkChecks(results: NonNullable<ReturnType<typeof calcDeal>>): { label: string; pass: boolean }[] {
+  const checks: { label: string; pass: boolean }[] = [
+    { label: 'Net yield ≥ 5%', pass: results.netYield >= 5 },
+    { label: 'Cash-on-cash ≥ 8%', pass: !!results.allCapitalOut || results.cashOnCash >= 8 },
+  ];
+  if (results.icr) checks.push({ label: 'ICR ≥ 145%', pass: results.icr.pass145 });
+  checks.push({
+    label: 'Stress tests positive',
+    pass: results.stress.rent10pctDrop >= 0 && results.stress.ratesAtFutureRate >= 0 && results.stress.void4weeks >= 0,
+  });
+  return checks;
+}
+
+function verdictBannerHtml(
+  results: NonNullable<ReturnType<typeof calcDeal>>,
+  stratLabel: string,
+  isBRR: boolean,
+): string {
+  const checks = benchmarkChecks(results);
+  const passes = checks.filter(c => c.pass).length;
+  const total = checks.length;
+  const grade = passes === total
+    ? { word: 'Strong', fg: '#166534', bg: '#f0fdf4', dot: '#22c55e', border: '#22c55e' }
+    : passes >= Math.ceil(total / 2)
+      ? { word: 'Moderate', fg: '#92400e', bg: '#fffbeb', dot: '#f59e0b', border: '#f59e0b' }
+      : { word: 'Weak', fg: '#991b1b', bg: '#fef2f2', dot: '#ef4444', border: '#ef4444' };
+  const chips = checks.map(c =>
+    `<span class="v-chip" style="color:${c.pass ? '#166534' : '#991b1b'};background:${c.pass ? '#dcfce7' : '#fee2e2'}">${c.pass ? '✓' : '✗'} ${c.label}</span>`,
+  ).join('');
+  return `<div class="verdict" style="background:${grade.bg};border:1px solid ${grade.border}55">
+  <div class="v-line">
+    <span class="v-dot" style="background:${grade.dot}"></span>
+    <span class="v-text" style="color:${grade.fg}">${grade.word} ${stratLabel}${isBRR ? ' (BRR)' : ''} — passes ${passes}/${total} benchmarks</span>
+  </div>
+  <div class="v-chips">${chips}</div>
+</div>`;
+}
+
+function perYearTableHtml(years: NonNullable<ReturnType<typeof calcDeal>>['projection5yr']['years']): string {
+  const rows = years.map(y => `<tr>
+      <td>Yr ${y.year}</td>
+      <td>${gbp(y.grossIncome)}</td>
+      <td>(${gbp(y.mortgage)})</td>
+      <td>(${gbp(y.opex)})</td>
+      <td style="color:${y.netCashflow < 0 ? '#dc2626' : '#166534'}">${y.netCashflow < 0 ? '−' : ''}${gbp(Math.abs(y.netCashflow))}</td>
+      <td>${gbp(y.cumulativeCashflow)}</td>
+      <td>${gbp(y.estimatedValue)}</td>
+    </tr>`).join('');
+  return `<table class="yr-table" style="margin-top:8px">
+  <thead>
+    <tr>
+      <th>Year</th><th>Income</th><th>Mortgage</th><th>Opex</th><th>Net</th><th>Cumulative</th><th>Est. Value</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>`;
+}
+
+function comparablesCalloutHtml(sales: SoldSale[], price: number): string {
+  const prices = sales.map(s => s.price || 0).filter(p => p > 0).sort((a, b) => a - b);
+  if (!prices.length || !(price > 0)) return '';
+  const mid = Math.floor(prices.length / 2);
+  const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+  const delta = price - median;
+  const pctDelta = median > 0 ? (Math.abs(delta) / median) * 100 : 0;
+  const below = delta <= 0;
+  return `<div class="comp-callout" style="background:${below ? '#f0fdf4' : '#fffbeb'};color:${below ? '#166534' : '#92400e'}">
+    Median of ${prices.length} recent sale${prices.length !== 1 ? 's' : ''}: <strong>${gbp(median)}</strong> —
+    purchase price is <strong>${gbp(Math.abs(delta))} (${pct(pctDelta)})</strong> ${below ? 'below' : 'above'} the local median.
+  </div>`;
+}
+
+interface DealSection {
+  css: string;
+  html: string;
+}
+
+function dealSectionHtml(
   deal: DealReportData,
   results: NonNullable<ReturnType<typeof calcDeal>>,
   soldPrices: SoldSale[],
-): string {
+  index: number,
+  total: number,
+): DealSection {
+  const scope = `d${index}`;
   const color = STRAT_COLOR[deal.strategy];
   const stratLabel = STRAT_LABEL[deal.strategy];
   const isBRR = deal.strategy === 'btl' && deal.inputs.refinanceAfterRefurb === 'yes';
@@ -313,58 +397,42 @@ function buildHtml(
   const bandLabel = deal.inputs.taxBand === 'basic' ? '20%' : deal.inputs.taxBand === 'additional' ? '45%' : '40%';
   const ownershipLabel = deal.inputs.ownership === 'company' ? 'Ltd Company' : `Personal, ${bandLabel} band`;
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Deal Report: ${deal.label}</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1e293b; background: #fff; padding: 20px 24px 32px; }
+  // Strategy-coloured rules scoped to this deal's section so multi-deal
+  // documents can mix strategies without the styles clobbering each other
+  const css = `
+#${scope} .accent-bar { background: ${color}; }
+#${scope} .badge { background: ${color}; }
+#${scope} .badge-outline { border-color: ${color}44; color: ${color}; }
+#${scope} .kpi-value { color: ${color}; }
+#${scope} .kpi-value.neg { color: #dc2626; }
+#${scope} .flood-pill { background: ${floodBgC}; border-color: ${floodFC}40; }
+#${scope} .flood-dot { background: ${floodFC}; }
+#${scope} .flood-text { color: ${floodFC}; }`;
 
-  .header { border-left: 5px solid ${color}; padding-left: 14px; margin-bottom: 20px; }
-  .header h1 { font-size: 20px; font-weight: 800; color: #0f172a; line-height: 1.2; }
-  .header-meta { margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .badge { display: inline-block; background: ${color}; color: #fff; border-radius: 6px; padding: 3px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
-  .badge-outline { display: inline-block; border: 1.5px solid ${color}44; color: ${color}; border-radius: 6px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
-  .meta-pill { font-size: 11px; color: #64748b; background: #f1f5f9; border-radius: 4px; padding: 2px 8px; }
+  const html = `<section class="deal" id="${scope}">
 
-  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
-  .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
-  .kpi-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.9px; color: #94a3b8; margin-bottom: 4px; }
-  .kpi-value { font-size: 18px; font-weight: 800; color: ${color}; line-height: 1; }
-  .kpi-value.neg { color: #dc2626; }
-  .kpi-sub { font-size: 9px; color: #94a3b8; margin-top: 3px; }
+<div class="brand">
+  <svg width="32" height="32" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.8 2.5 11.2h2.6V21h5.2v-5.6h3.4V21h5.2v-9.8h2.6L12 2.8z" fill="${color}"/></svg>
+  <div class="brand-text">
+    <div class="wordmark">${APP_NAME}</div>
+    <div class="brand-sub">Investment Deal Report</div>
+  </div>
+  <div class="brand-date">${dateStr}${total > 1 ? `<br>Deal ${index + 1} of ${total}` : ''}</div>
+</div>
+<div class="accent-bar"></div>
 
-  h2 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
-
-  table { width: 100%; border-collapse: collapse; }
-  td { padding: 5px 10px; font-size: 12px; border-bottom: 1px solid #f1f5f9; color: #374151; }
-  td:last-child { text-align: right; font-weight: 600; color: #0f172a; }
-  tr.sub td { font-size: 11px; color: #94a3b8; border-bottom: 1px solid #f8fafc; }
-  tr.sub td:last-child { color: #94a3b8; font-weight: 500; }
-  tr.total td { font-weight: 700; font-size: 13px; border-top: 2px solid #e2e8f0; border-bottom: none; color: #0f172a; background: #f8fafc; padding: 7px 10px; }
-
-  .chart-section { margin-bottom: 4px; }
-
-  .flood-pill { display: inline-flex; align-items: center; gap: 6px; background: ${floodBgC}; border: 1px solid ${floodFC}40; border-radius: 20px; padding: 4px 12px; }
-  .flood-dot { width: 8px; height: 8px; border-radius: 50%; background: ${floodFC}; flex-shrink: 0; }
-  .flood-text { font-size: 12px; font-weight: 600; color: ${floodFC}; }
-
-  footer { margin-top: 28px; font-size: 10px; color: #94a3b8; text-align: center; padding-top: 12px; border-top: 1px solid #e2e8f0; }
-</style>
-</head>
-<body>
-
-<div class="header">
+<div class="deal-title">
   <h1>${deal.label}</h1>
   <div class="header-meta">
     <span class="badge">${stratLabel}${isBRR ? ' · BRR' : ''}</span>
     ${deal.inputs.postcode ? `<span class="badge-outline">${deal.inputs.postcode.toUpperCase()}</span>` : ''}
     ${deal.inputs.bedrooms ? `<span class="meta-pill">${deal.inputs.bedrooms} bed</span>` : ''}
     ${deal.inputs.epcRating ? `<span class="meta-pill">EPC ${deal.inputs.epcRating}</span>` : ''}
+    <span class="meta-pill">Generated ${dateStr}</span>
   </div>
 </div>
+
+${verdictBannerHtml(results, stratLabel, isBRR)}
 
 <div class="kpi-grid">
   <div class="kpi">
@@ -439,6 +507,7 @@ function buildHtml(
 
 <h2>5-Year Cumulative Return</h2>
 <div class="chart-section">${projSVG}</div>
+${perYearTableHtml(results.projection5yr.years)}
 <table style="margin-top:8px">
   <tr><td>Estimated Property Value (${deal.inputs.capitalGrowthPct || '3'}% pa)</td><td>${gbp(results.projection5yr.estimatedValue)}</td></tr>
   <tr><td>Capital Growth Over 5 Years</td><td>${gbp(results.projection5yr.capitalGrowth)}</td></tr>
@@ -490,26 +559,133 @@ ${results.icr ? `
 </table>
 
 <h2>Recent Sold Prices Nearby</h2>
+${comparablesCalloutHtml(soldPrices, price)}
 ${soldPricesHtml(soldPrices)}
 
 <footer>
-  Property Deal Calculator &nbsp;&middot;&nbsp; Generated ${dateStr} &nbsp;&middot;&nbsp; For illustration only — not financial advice.
+  <div><strong>${APP_NAME}</strong> &nbsp;&middot;&nbsp; ${APP_URL}</div>
+  <div>Generated ${dateStr}${total > 1 ? ` &nbsp;&middot;&nbsp; Deal ${index + 1} of ${total}` : ''} &nbsp;&middot;&nbsp; For illustration only — not financial advice.</div>
 </footer>
+
+</section>`;
+
+  return { css, html };
+}
+
+const GLOBAL_CSS = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1e293b; background: #fff; padding: 20px 24px 32px; }
+
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-text { flex: 1; }
+  .wordmark { font-size: 15px; font-weight: 800; color: #0f172a; letter-spacing: 0.2px; }
+  .brand-sub { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.4px; color: #94a3b8; margin-top: 2px; }
+  .brand-date { font-size: 10px; color: #64748b; text-align: right; line-height: 1.5; }
+  .accent-bar { height: 4px; border-radius: 2px; margin: 10px 0 16px; }
+
+  .deal-title h1 { font-size: 20px; font-weight: 800; color: #0f172a; line-height: 1.2; }
+  .header-meta { margin: 6px 0 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { display: inline-block; color: #fff; border-radius: 6px; padding: 3px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
+  .badge-outline { display: inline-block; border: 1.5px solid; border-radius: 6px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
+  .meta-pill { font-size: 11px; color: #64748b; background: #f1f5f9; border-radius: 4px; padding: 2px 8px; }
+
+  .verdict { border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
+  .v-line { display: flex; align-items: center; gap: 8px; }
+  .v-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .v-text { font-size: 13px; font-weight: 800; }
+  .v-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .v-chip { font-size: 10px; font-weight: 600; border-radius: 10px; padding: 2px 8px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+  .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
+  .kpi-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.9px; color: #94a3b8; margin-bottom: 4px; }
+  .kpi-value { font-size: 18px; font-weight: 800; line-height: 1; }
+  .kpi-sub { font-size: 9px; color: #94a3b8; margin-top: 3px; }
+
+  h2 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 10px; font-size: 12px; border-bottom: 1px solid #f1f5f9; color: #374151; }
+  td:last-child { text-align: right; font-weight: 600; color: #0f172a; }
+  tr.sub td { font-size: 11px; color: #94a3b8; border-bottom: 1px solid #f8fafc; }
+  tr.sub td:last-child { color: #94a3b8; font-weight: 500; }
+  tr.total td { font-weight: 700; font-size: 13px; border-top: 2px solid #e2e8f0; border-bottom: none; color: #0f172a; background: #f8fafc; padding: 7px 10px; }
+
+  .yr-table th { padding: 5px 8px; font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; text-align: right; font-weight: 600; background: #f8fafc; }
+  .yr-table th:first-child { text-align: left; }
+  .yr-table td { padding: 5px 8px; font-size: 11px; text-align: right; font-weight: 500; color: #374151; }
+  .yr-table td:first-child { text-align: left; font-weight: 600; color: #0f172a; }
+  .yr-table td:last-child { font-weight: 600; color: #0f172a; }
+
+  .comp-callout { border-radius: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+
+  .chart-section { margin-bottom: 4px; }
+
+  .flood-pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid; border-radius: 20px; padding: 4px 12px; }
+  .flood-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .flood-text { font-size: 12px; font-weight: 600; }
+
+  footer { margin-top: 28px; font-size: 10px; color: #94a3b8; text-align: center; padding-top: 12px; border-top: 1px solid #e2e8f0; line-height: 1.6; }
+
+  /* Print pagination: page-break between deals, keep blocks intact.
+     The @page page-number margin box is best-effort — WebKit-based
+     printers (expo-print) ignore it; the per-deal footer carries the
+     "Deal n of m" marker either way. */
+  @page { margin: 18px 14px 26px; @bottom-right { content: 'Page ' counter(page); font-size: 9px; color: #94a3b8; } }
+  section.deal { page-break-after: always; }
+  section.deal:last-of-type { page-break-after: auto; }
+  table, .chart-section, .kpi-grid, .verdict, .brand, .comp-callout { page-break-inside: avoid; }
+  h2 { page-break-after: avoid; }
+`;
+
+function buildDocumentHtml(sections: DealSection[], title: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>${GLOBAL_CSS}
+${sections.map(s => s.css).join('\n')}
+</style>
+</head>
+<body>
+${sections.map(s => s.html).join('\n')}
 </body>
 </html>`;
 }
 
-export async function generateAndShareDealPDF(deal: DealReportData): Promise<void> {
-  const results = calcDeal(deal.inputs);
-  if (!results) throw new Error('Could not calculate deal results');
+export async function generateAndShareMultiDealPDF(deals: DealReportData[]): Promise<void> {
+  const sections: DealSection[] = [];
+  const calculated: DealReportData[] = [];
+  for (const deal of deals) {
+    const results = calcDeal(deal.inputs);
+    if (!results) continue;
+    const soldPrices = await fetchSoldPrices(deal.inputs.postcode).catch(() => []);
+    calculated.push(deal);
+    sections.push(dealSectionHtml(deal, results, soldPrices, calculated.length - 1, deals.length));
+  }
+  if (!sections.length) throw new Error('Could not calculate deal results');
+  // Re-number against the count that actually rendered
+  if (calculated.length !== deals.length) {
+    sections.length = 0;
+    for (let i = 0; i < calculated.length; i++) {
+      const results = calcDeal(calculated[i].inputs)!;
+      const soldPrices = await fetchSoldPrices(calculated[i].inputs.postcode).catch(() => []);
+      sections.push(dealSectionHtml(calculated[i], results, soldPrices, i, calculated.length));
+    }
+  }
 
-  const soldPrices = await fetchSoldPrices(deal.inputs.postcode).catch(() => []);
-
-  const html = buildHtml(deal, results, soldPrices);
+  const single = calculated.length === 1;
+  const title = single ? `Deal Report: ${calculated[0].label}` : `Deal Reports — ${calculated.length} deals`;
+  const html = buildDocumentHtml(sections, title);
   const { uri } = await Print.printToFileAsync({ html, base64: false });
   await Sharing.shareAsync(uri, {
     mimeType: 'application/pdf',
-    dialogTitle: `Share: ${deal.label}`,
+    dialogTitle: single ? `Share: ${calculated[0].label}` : `Share: ${calculated.length} deal reports`,
     UTI: 'com.adobe.pdf',
   });
+}
+
+export async function generateAndShareDealPDF(deal: DealReportData): Promise<void> {
+  return generateAndShareMultiDealPDF([deal]);
 }
