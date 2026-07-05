@@ -133,7 +133,7 @@ function yieldChartSVG(grossYield: number, netYield: number, cashOnCash: number)
   </svg>`;
 }
 
-function projectionChartSVG(annualCashflow: number, capitalGrowth5yr: number): string {
+function projectionChartSVG(years: { year: number; cumulativeCashflow: number; capitalGrowth: number }[]): string {
   const W = 380;
   const H = 150;
   const CHART_H = 95;
@@ -142,10 +142,10 @@ function projectionChartSVG(annualCashflow: number, capitalGrowth5yr: number): s
   const GAP = 18;
   const START_X = 22;
 
-  const data = [1, 2, 3, 4, 5].map(yr => ({
-    yr,
-    cashflow: annualCashflow * yr,
-    capital: (capitalGrowth5yr / 5) * yr,
+  const data = years.map(y => ({
+    yr: y.year,
+    cashflow: y.cumulativeCashflow,
+    capital: y.capitalGrowth,
   }));
 
   const maxVal = Math.max(...data.map(d => Math.abs(d.cashflow) + Math.abs(d.capital)), 1);
@@ -284,7 +284,9 @@ function buildHtml(
   const totalFees = solicitor + mortFee + otherFees;
   const deposit = results.deposit;
   const ongoingMortgage = results.monthlyPostRefiMortgage ?? results.monthlyMortgage;
-  const refurb = Math.max(0, results.totalInvested - results.totalPurchaseCosts - (results.initialFinancingCost ?? 0));
+  const refurb = results.refurbTotal;
+  const holding = results.holdingCosts;
+  const setupCost = results.stlSetupCost + results.hmoSetupCost;
 
   const floodColors: Record<string, string> = { low: '#22c55e', medium: '#f59e0b', high: '#ef4444' };
   const floodBgMap: Record<string, string> = { low: '#f0fdf4', medium: '#fffbeb', high: '#fef2f2' };
@@ -299,7 +301,7 @@ function buildHtml(
   );
   const yieldSVG = yieldChartSVG(results.grossYield, results.netYield, results.cashOnCash);
   const capitalSVG = capitalChartSVG(deposit, results.stampDuty, totalFees, refurb);
-  const projSVG = projectionChartSVG(results.annualNetCashflow, results.projection5yr.capitalGrowth);
+  const projSVG = projectionChartSVG(results.projection5yr.years);
 
   const sdltRows = results.sdltBreakdown
     .filter(b => b.tax > 0)
@@ -308,6 +310,8 @@ function buildHtml(
 
   const dateStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const futureRateLabel = deal.inputs.mortgageFutureRate ? `at ${deal.inputs.mortgageFutureRate}%` : 'stress rate';
+  const bandLabel = deal.inputs.taxBand === 'basic' ? '20%' : deal.inputs.taxBand === 'additional' ? '45%' : '40%';
+  const ownershipLabel = deal.inputs.ownership === 'company' ? 'Ltd Company' : `Personal, ${bandLabel} band`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -407,7 +411,9 @@ function buildHtml(
   <tr><td>Solicitor / Legal Fees</td><td>${gbp(solicitor)}</td></tr>
   <tr><td>Mortgage Arrangement Fee</td><td>${gbp(mortFee)}</td></tr>
   ${otherFees > 0 ? `<tr><td>Other Purchase Costs</td><td>${gbp(otherFees)}</td></tr>` : ''}
-  ${refurb > 0 ? `<tr><td>Refurbishment</td><td>${gbp(refurb)}</td></tr>` : ''}
+  ${refurb > 0 ? `<tr><td>Refurbishment${deal.inputs.refurbContingencyPct ? ` (incl. ${deal.inputs.refurbContingencyPct}% contingency)` : ''}</td><td>${gbp(refurb)}</td></tr>` : ''}
+  ${holding > 0 ? `<tr><td>Holding Costs</td><td>${gbp(holding)}</td></tr>` : ''}
+  ${setupCost > 0 ? `<tr><td>${deal.strategy === 'hmo' ? 'HMO' : 'STL'} Setup Costs</td><td>${gbp(setupCost)}</td></tr>` : ''}
   ${results.initialFinancingCost ? `<tr><td>Bridging Finance Cost</td><td>${gbp(results.initialFinancingCost)}</td></tr>` : ''}
   <tr class="total"><td>Total Capital Required</td><td>${gbp(results.totalInvested)}</td></tr>
   ${isBRR && results.capitalLeftIn != null ? `<tr class="sub"><td style="padding-left:20px">Capital Left In (post-refinance)</td><td>${gbp(results.capitalLeftIn)}</td></tr>` : ''}
@@ -448,6 +454,24 @@ function buildHtml(
     ${stressRow('4-week void period', results.stress.void4weeks)}
   </tbody>
 </table>
+
+${results.tax ? `
+<h2>Tax — ${ownershipLabel}</h2>
+<table>
+  <tr><td>Taxable Profit (annual)</td><td>${gbp(results.tax.taxableProfit)}</td></tr>
+  <tr><td>Est. Annual Tax</td><td style="color:#dc2626">(${gbp(results.tax.annualTax)})</td></tr>
+  <tr><td>Post-Tax Monthly Cashflow</td><td style="color:${results.tax.postTaxMonthlyCashflow < 0 ? '#dc2626' : '#166534'}">${results.tax.postTaxMonthlyCashflow < 0 ? '−' : ''}${gbp(Math.abs(results.tax.postTaxMonthlyCashflow))}</td></tr>
+  <tr><td>Post-Tax Annual Cashflow</td><td style="color:${results.tax.postTaxAnnualCashflow < 0 ? '#dc2626' : '#166534'}">${results.tax.postTaxAnnualCashflow < 0 ? '−' : ''}${gbp(Math.abs(results.tax.postTaxAnnualCashflow))}</td></tr>
+  <tr class="total"><td>Post-Tax Cash-on-Cash</td><td>${results.allCapitalOut ? '∞ — all capital out' : pct(results.tax.postTaxCoC)}</td></tr>
+</table>` : ''}
+
+${results.icr ? `
+<h2>Lender ICR (stress @ ${results.icr.stressRate.toFixed(1)}%)</h2>
+<table>
+  <tr><td>Interest Coverage</td><td style="color:${results.icr.pass125 ? '#166534' : '#dc2626'}">${pct(results.icr.ratio, 0)}</td></tr>
+  <tr><td>125% test (basic rate / ltd co)</td><td style="color:${results.icr.pass125 ? '#166534' : '#dc2626'}">${results.icr.pass125 ? '✓ Pass' : '✗ Fail'}</td></tr>
+  <tr><td>145% test (higher rate)</td><td style="color:${results.icr.pass145 ? '#166534' : '#dc2626'}">${results.icr.pass145 ? '✓ Pass' : '✗ Fail'}</td></tr>
+</table>` : ''}
 
 <h2>Due Diligence</h2>
 <table>

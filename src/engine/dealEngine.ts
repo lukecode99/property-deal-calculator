@@ -283,6 +283,7 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     : monthlyOngoingMortgage;
 
   let cumulativeCashflow = 0;
+  const projectionYears: DealResults['projection5yr']['years'] = [];
   for (let yr = 1; yr <= 5; yr++) {
     const factor = Math.pow(1 + incIncrease, yr - 1);
     const adjIncome = monthlyGrossIncome * factor;
@@ -293,6 +294,13 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     const yrMortgage = yr <= initialTerm ? monthlyOngoingMortgage : futureMonthlyMortgage;
     const adjNet = (adjIncome - yrMortgage - adjOpex) * 12;
     cumulativeCashflow += adjNet;
+    const yrCapitalGrowth = baseValueForGrowth * (Math.pow(1 + growth, yr) - 1);
+    projectionYears.push({
+      year: yr,
+      cumulativeCashflow,
+      capitalGrowth: yrCapitalGrowth,
+      totalReturn: yrCapitalGrowth + cumulativeCashflow,
+    });
   }
 
   const totalReturn = capitalGrowth + cumulativeCashflow;
@@ -304,6 +312,8 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     totalInvested,
     capitalOnPurchase,
     detailedRefurbTotal,
+    refurbTotal: refurb,
+    holdingCosts,
     initialFinancingCost: initialFinancingCost > 0 ? initialFinancingCost : undefined,
     initialFinancingInterest: initialFinancingInterest > 0 ? initialFinancingInterest : undefined,
     deposit,
@@ -341,6 +351,7 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
       capitalGrowth,
       cumulativeCashflow,
       totalReturn,
+      years: projectionYears,
     },
   };
 }

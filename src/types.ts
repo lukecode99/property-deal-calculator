@@ -139,6 +139,8 @@ export interface DealResults {
   totalInvested: number;
   capitalOnPurchase?: number;
   detailedRefurbTotal?: number;
+  refurbTotal: number;         // refurb incl. contingency — the figure added into totalInvested
+  holdingCosts: number;
 
   // Initial financing (BRR)
   initialFinancingCost?: number;
@@ -204,6 +206,14 @@ export interface DealResults {
     capitalGrowth: number;
     cumulativeCashflow: number;
     totalReturn: number;
+    // Year-by-year values matching the engine's compounding growth and
+    // income/mortgage glide path — cumulative as at the end of each year
+    years: {
+      year: number;
+      cumulativeCashflow: number;
+      capitalGrowth: number;
+      totalReturn: number;
+    }[];
   };
 }
 
