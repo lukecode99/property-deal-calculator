@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, font } from '../theme';
 import { DealInputs, DealExtras, Strategy, Ownership, RefurbMode, FeeMode, DEFAULT_INPUTS } from '../types';
 import { calcDeal } from '../engine/dealEngine';
@@ -318,6 +319,7 @@ export function CalculatorScreen() {
       setSoldError('Enter a valid UK postcode, e.g. SW1A 2AA');
       return;
     }
+    Haptics.selectionAsync();
     setDdPostcode(pc);
     setSoldPostcode(pc);
     setPlanningPostcode(pc);
@@ -599,6 +601,7 @@ export function CalculatorScreen() {
 
   function saveDeal() {
     if (!results) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const label = [inputs.houseNumber, inputs.postcode].filter(Boolean).join(', ');
     setSavedDeals(prev => {
       const next = [...prev, {
@@ -625,6 +628,7 @@ export function CalculatorScreen() {
 
   function updateDeal() {
     if (!results || editingDealId === null) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const label = [inputs.houseNumber, inputs.postcode].filter(Boolean).join(', ');
     setSavedDeals(prev => prev.map(d => d.id === editingDealId ? {
       ...d,

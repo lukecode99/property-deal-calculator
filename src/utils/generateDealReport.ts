@@ -1,5 +1,6 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
 import { calcDeal } from '../engine/dealEngine';
 import { DealInputs, Strategy } from '../types';
 
@@ -684,6 +685,7 @@ export async function generateAndShareMultiDealPDF(deals: DealReportData[]): Pro
     dialogTitle: single ? `Share: ${calculated[0].label}` : `Share: ${calculated.length} deal reports`,
     UTI: 'com.adobe.pdf',
   });
+  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 }
 
 export async function generateAndShareDealPDF(deal: DealReportData): Promise<void> {
