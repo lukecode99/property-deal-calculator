@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-07-22T01:00:19.759Z",
+  "fetchedAt": "2026-07-24T01:00:16.796Z",
   "baseRate": {
     "value": 3.75,
     "source": "Bank of England"
@@ -10,22 +10,22 @@
   },
   "forwardRates": {
     "yr1": {
-      "baseRate": 3.5,
-      "btlRate": 5
+      "baseRate": 3.6,
+      "btlRate": 5.1
     },
     "yr2": {
-      "baseRate": 3.25,
-      "btlRate": 4.8
+      "baseRate": 3.6,
+      "btlRate": 5.1
     },
     "yr5": {
-      "baseRate": 3.25,
-      "btlRate": 4.8
+      "baseRate": 3.7,
+      "btlRate": 5.2
     },
     "source": "Market-implied (SONIA OIS / analyst consensus)"
   },
   "housePriceGrowth": {
-    "value": 3.8,
-    "source": "Land Registry HPI (2026-04)"
+    "value": 2.7,
+    "source": "Land Registry HPI (2026-05)"
   },
   "rentalGrowth": {
     "value": 6.1,
