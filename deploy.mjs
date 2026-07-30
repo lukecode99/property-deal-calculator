@@ -33,7 +33,20 @@ execSync(
 );
 
 // Step 3: Clear and replace contents (preserve .git)
-const gitDir = resolve(PAGES_DIR, '.git');
+//
+// market-data.json is written straight onto gh-pages by the daily "Update
+// market data" automation and exists nowhere in the repo, so the wipe below
+// would delete it and the web app would lose live rates until the next
+// overnight run. Carry it across. privacy.html and support.html used to have
+// the same problem; they now live in public/ and come through dist/.
+const CARRY_OVER = ['market-data.json'];
+const carried = new Map();
+for (const name of CARRY_OVER) {
+  const p = resolve(PAGES_DIR, name);
+  if (existsSync(p)) carried.set(name, readFileSync(p));
+  else console.warn(`! ${name} not found on gh-pages — nothing to carry over`);
+}
+
 for (const entry of (await import('fs')).readdirSync(PAGES_DIR)) {
   if (entry === '.git') continue;
   rmSync(resolve(PAGES_DIR, entry), { recursive: true, force: true });
@@ -43,6 +56,10 @@ for (const entry of (await import('fs')).readdirSync(PAGES_DIR)) {
 cpSync(DIST, PAGES_DIR, { recursive: true });
 // Ensure .nojekyll exists so GitHub Pages doesn't ignore _expo/
 writeFileSync(resolve(PAGES_DIR, '.nojekyll'), '');
+for (const [name, buf] of carried) {
+  writeFileSync(resolve(PAGES_DIR, name), buf);
+  console.log(`✓ Carried over ${name}`);
+}
 console.log('✓ Copied new dist/ to gh-pages working dir');
 
 // Step 4: Commit and push
@@ -56,11 +73,17 @@ if (!status) {
   process.exit(0);
 }
 
-const fakeTs = '2026-06-28T23:25:00+0100';
-execSync(
-  `GIT_AUTHOR_DATE="${fakeTs}" GIT_COMMITTER_DATE="${fakeTs}" git -C ${PAGES_DIR} commit -m "Deploy v34 — View Ofsted report link on all school cards"`,
-  { stdio: 'inherit', shell: true }
-);
+// Message was hardcoded to one specific release ("Deploy v34 — View Ofsted
+// report link on all school cards") and back-dated to a fixed timestamp, so
+// every deploy since has claimed to be that one and to have happened on
+// 28 June. Take the message from argv (or the current main commit) and let git
+// stamp the real time.
+const msg =
+  process.argv.slice(2).join(' ').trim() ||
+  `Deploy ${execSync(`git -C ${__dirname} rev-parse --short HEAD`).toString().trim()} — ` +
+    execSync(`git -C ${__dirname} log -1 --pretty=%s`).toString().trim();
+
+execSync(`git -C ${PAGES_DIR} commit -m ${JSON.stringify(msg)}`, { stdio: 'inherit' });
 
 execSync(
   `git -C ${PAGES_DIR} -c http.sslVerify=false -c "http.extraHeader=${AUTH_HEADER}" push ${REPO_URL} gh-pages`,
