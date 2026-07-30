@@ -1,8 +1,8 @@
 {
-  "fetchedAt": "2026-07-30T01:20:00.129Z",
+  "fetchedAt": "2026-07-30T01:21:55.892Z",
   "baseRate": {
     "value": 3.75,
-    "source": "Bank of England"
+    "source": "Bank of England [carried forward from 2026-07-30]"
   },
   "btlMortgageRate": {
     "value": 5.3,
