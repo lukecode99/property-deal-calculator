@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Platform, Share, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import AdBanner from '../components/AdBanner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -1004,7 +1004,7 @@ export function CalculatorScreen() {
                       </View>
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: data.police.uk (UK street-level crime). Crimes are averaged over the last {crimeData.monthsAnalysed} months at the nearest reporting location.</Text>
+                  {crimeData && <Text style={styles.floodDisclaimer}>Source: data.police.uk (UK street-level crime). Crimes are averaged over the last {crimeData.monthsAnalysed} months at the nearest reporting location.</Text>}
                 </View>
               </View>
             )}
@@ -2208,13 +2208,7 @@ export function CalculatorScreen() {
         </View>
       )}
 
-      {Platform.OS !== 'web' && (
-        <BannerAd
-          unitId={__DEV__ ? TestIds.BANNER : 'ca-app-pub-9879821077971587/6284121138'}
-          size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-          requestOptions={{ requestNonPersonalizedAdsOnly: true }}
-        />
-      )}
+      <AdBanner />
 
       {/* Bottom navigation */}
       <View style={styles.bottomNav}>
