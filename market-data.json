@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-07-30T01:00:20.849Z",
+  "fetchedAt": "2026-07-30T01:20:00.129Z",
   "baseRate": {
     "value": 3.75,
     "source": "Bank of England"
@@ -7,21 +7,6 @@
   "btlMortgageRate": {
     "value": 5.3,
     "source": "BoE base 3.75% + 1.5% BTL spread"
-  },
-  "forwardRates": {
-    "yr1": {
-      "baseRate": 3.5,
-      "btlRate": 5
-    },
-    "yr2": {
-      "baseRate": 3.25,
-      "btlRate": 4.8
-    },
-    "yr5": {
-      "baseRate": 3.25,
-      "btlRate": 4.8
-    },
-    "source": "Market-implied (SONIA OIS / analyst consensus)"
   },
   "housePriceGrowth": {
     "value": 2.7,
