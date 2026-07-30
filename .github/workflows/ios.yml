@@ -133,6 +133,9 @@ jobs:
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
+          # Default keychain auto-locks after 5 min; a long Xcode build then
+          # hangs at the signing step waiting for a UI prompt that never comes.
+          security set-keychain-settings -lut 21600 build.keychain
           security import dist.p12 \
             -k build.keychain \
             -P "${{ secrets.IOS_P12_PASSWORD }}" \
