@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Platform, Share, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -2205,6 +2206,14 @@ export function CalculatorScreen() {
             <Text style={styles.stickyValue}>{fmtPct(results.netYield, 1)}</Text>
           </View>
         </View>
+      )}
+
+      {Platform.OS !== 'web' && (
+        <BannerAd
+          unitId={__DEV__ ? TestIds.BANNER : 'ca-app-pub-9879821077971587/6284121138'}
+          size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+          requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+        />
       )}
 
       {/* Bottom navigation */}
