@@ -33,7 +33,7 @@ interface MarketData {
 const STRATEGIES: { key: Strategy; label: string; color: string }[] = [
   { key: 'btl', label: 'Buy-to-Let', color: colors.btl },
   { key: 'hmo', label: 'HMO', color: colors.hmo },
-  { key: 'stl', label: 'STL / AirBnB', color: colors.stl },
+  { key: 'stl', label: 'STL / Airbnb', color: colors.stl },
 ];
 
 interface SavedDeal {
@@ -228,6 +228,7 @@ export function CalculatorScreen() {
   };
   const [floodRisk, setFloodRisk] = useState<FloodRisk | null>(null);
   const [floodLoading, setFloodLoading] = useState(false);
+  const [floodError, setFloodError] = useState<string | null>(null);
 
   type PlanningApp = { reference: string; address: string; description: string; status: string; type: string; date: string; decisionDate: string; url: string; distanceM: number | null };
   const [planningPostcode, setPlanningPostcode] = useState('');
@@ -293,22 +294,23 @@ export function CalculatorScreen() {
     setSoldLoading(true);
     setSoldError(null);
     setSoldPrices(null);
-    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
       .then(r => r.json())
       .then((d: any) => {
         if (d.error) throw new Error(d.error);
         setSoldPrices(d.sales ?? []);
       })
-      .catch(e => setSoldError(e.message ?? 'Lookup failed'))
+      .catch(e => setSoldError(`Sold prices: ${e.message ?? 'network error'} — tap Search to retry`))
       .finally(() => setSoldLoading(false));
     // Fetch flood risk for this postcode if different from current
     if (floodRisk?.postcode !== pc) {
       setFloodRisk(null);
       setFloodLoading(true);
-      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      setFloodError(null);
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
         .then(r => r.json())
         .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
-        .catch(() => {})
+        .catch(e => setFloodError(e.message ?? 'Flood risk lookup failed'))
         .finally(() => setFloodLoading(false));
     }
   }
@@ -323,73 +325,90 @@ export function CalculatorScreen() {
     setDdPostcode(pc);
     setSoldPostcode(pc);
     setPlanningPostcode(pc);
-    // Sold prices
+    // Reset all source state
     setSoldLoading(true); setSoldError(null); setSoldPrices(null);
-    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setSoldPrices(d.sales ?? []); })
-      .catch(e => setSoldError(e.message ?? 'Lookup failed'))
-      .finally(() => setSoldLoading(false));
-    // Flood risk
-    if (floodRisk?.postcode !== pc) {
-      setFloodRisk(null); setFloodLoading(true);
-      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-        .then(r => r.json())
-        .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
-        .catch(() => {}).finally(() => setFloodLoading(false));
-    }
-    // Planning
+    setFloodRisk(null); setFloodLoading(true); setFloodError(null);
     setPlanningLoading(true); setPlanningError(null); setPlanningData(null); setPlanningNote(null); setPlanningCouncil('');
-    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); setPlanningCouncil(d.council ?? ''); })
-      .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
-      .finally(() => setPlanningLoading(false));
-    // EPC ratings
     setEpcLoading(true); setEpcError(null); setEpcData(null);
-    fetch(`https://epc.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setEpcData(d.results ?? []); })
-      .catch(e => setEpcError(e.message ?? 'Lookup failed'))
-      .finally(() => setEpcLoading(false));
-    // Crime
     setCrimeLoading(true); setCrimeError(null); setCrimeData(null);
-    fetch(`https://crime.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setCrimeData(d); })
-      .catch(e => setCrimeError(e.message ?? 'Lookup failed'))
-      .finally(() => setCrimeLoading(false));
-    // Transport
     setTransportLoading(true); setTransportError(null); setTransportData(null);
-    fetch(`https://transport.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setTransportData(d); })
-      .catch(e => setTransportError(e.message ?? 'Lookup failed'))
-      .finally(() => setTransportLoading(false));
-    // Rental benchmarks (LHA)
     setRentalLoading(true); setRentalError(null); setRentalData(null);
-    fetch(`https://rental.nanoluke521.workers.dev/?v=5&postcode=${encodeURIComponent(pc)}`)
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
-      .catch(e => setRentalError(e.message ?? 'Lookup failed'))
-      .finally(() => setRentalLoading(false));
-    // Schools (geocode postcode → lat/lon → schools worker)
     setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
-    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`)
+    // Existence gate — validate postcode via postcodes.io before firing all workers.
+    // Non-existent postcodes pass the regex but return 404 from the API.
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
       .then(r => r.json())
       .then((geo: any) => {
-        if (!geo.result) throw new Error('Postcode not found');
+        if (!geo.result) throw new Error('Postcode not found — check and try again');
         const { latitude: lat, longitude: lon } = geo.result;
-        return fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lon}&radius=2`);
+        // Postcode confirmed — fire all workers in parallel
+        // Sold prices
+        fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setSoldPrices(d.sales ?? []); })
+          .catch(e => setSoldError(`Sold prices: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setSoldLoading(false));
+        // Flood risk
+        fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
+          .catch(e => setFloodError(`Flood risk: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setFloodLoading(false));
+        // Planning
+        fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); setPlanningCouncil(d.council ?? ''); })
+          .catch(e => setPlanningError(`Planning: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setPlanningLoading(false));
+        // EPC ratings
+        fetch(`https://epc.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setEpcData(d.results ?? []); })
+          .catch(e => setEpcError(`EPC: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setEpcLoading(false));
+        // Crime
+        fetch(`https://crime.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setCrimeData(d); })
+          .catch(e => setCrimeError(`Crime data: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setCrimeLoading(false));
+        // Transport
+        fetch(`https://transport.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setTransportData(d); })
+          .catch(e => setTransportError(`Transport: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setTransportLoading(false));
+        // Rental benchmarks (LHA + employment)
+        fetch(`https://rental.nanoluke521.workers.dev/?v=5&postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
+          .catch(e => setRentalError(`Rental data: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setRentalLoading(false));
+        // Schools — use lat/lon already returned by the gate
+        fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lon}&radius=2`, { signal: AbortSignal.timeout(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setSchoolsData((d.schools ?? []).slice(0, 10)); })
+          .catch(e => setSchoolsError(`Schools: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setSchoolsLoading(false));
       })
-      .then(r => r.json())
-      .then((d: any) => { if (d.error) throw new Error(d.error); setSchoolsData((d.schools ?? []).slice(0, 10)); })
-      .catch(e => setSchoolsError(e.message ?? 'Schools lookup failed'))
-      .finally(() => setSchoolsLoading(false));
+      .catch(e => {
+        // Postcode doesn't exist or gate timed out — propagate to all source tabs
+        const msg = `${e.message ?? 'network error'} — check postcode and try again`;
+        setSoldError(msg); setSoldLoading(false);
+        setFloodError(msg); setFloodLoading(false);
+        setPlanningError(msg); setPlanningLoading(false);
+        setEpcError(msg); setEpcLoading(false);
+        setCrimeError(msg); setCrimeLoading(false);
+        setTransportError(msg); setTransportLoading(false);
+        setRentalError(msg); setRentalLoading(false);
+        setSchoolsError(msg); setSchoolsLoading(false);
+      });
   }
 
   useEffect(() => {
-    fetch('./market-data.json')
+    // Relative URL only resolves in the web build; skip fetch on native
+    if (Platform.OS !== 'web') return;
+    fetch('./market-data.json', { signal: AbortSignal.timeout(10000) })
       .then(r => r.json())
       .then((d: MarketData) => {
         setMarketData(d);
@@ -412,14 +431,15 @@ export function CalculatorScreen() {
 
   useEffect(() => {
     const pc = formatPostcode(inputs.postcode);
-    if (!isValidPostcode(pc)) { setFloodRisk(null); return; }
+    if (!isValidPostcode(pc)) { setFloodRisk(null); setFloodError(null); return; }
     if (floodRisk?.postcode === pc) return;
     const timer = setTimeout(() => {
       setFloodLoading(true);
-      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+      setFloodError(null);
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
         .then(r => r.json())
         .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
-        .catch(() => {})
+        .catch(e => setFloodError(`Flood risk: ${e.message ?? 'network error'}`))
         .finally(() => setFloodLoading(false));
     }, 800);
     return () => clearTimeout(timer);
@@ -438,7 +458,7 @@ export function CalculatorScreen() {
     setPlanningData(null);
     setPlanningNote(null);
     setPlanningCouncil('');
-    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`)
+    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
       .then(r => r.json())
       .then((d: any) => {
         if (d.error) throw new Error(d.error);
@@ -446,7 +466,7 @@ export function CalculatorScreen() {
         setPlanningNote(d.note ?? null);
         setPlanningCouncil(d.council ?? '');
       })
-      .catch(e => setPlanningError(e.message ?? 'Lookup failed'))
+      .catch(e => setPlanningError(`Planning: ${e.message ?? 'network error'} — tap Search to retry`))
       .finally(() => setPlanningLoading(false));
   }
 
@@ -462,7 +482,11 @@ export function CalculatorScreen() {
       'Label', 'Address', 'Postcode', 'Export Date', 'Strategy', 'Ownership',
       'Purchase Price', 'Fair Value', 'Renovated Value', 'EPC Rating', 'Bedrooms',
       'Solicitor Fees', 'Mortgage Fee', 'Other Costs',
-      'Refurb Cost', 'Refurb Contingency %', 'Holding Costs',
+      'Refurb Mode', 'Refurb Cost', 'Refurb Contingency %',
+      'rd: Rip Out & Skip', 'rd: Kitchen', 'rd: Electrics', 'rd: Bathroom',
+      'rd: Plastering', 'rd: Internal Doors', 'rd: External Doors', 'rd: Windows',
+      'rd: Tiling', 'rd: Carpet & Flooring', 'rd: Boiler & Heating', 'rd: Roof', 'rd: Damp Proofing',
+      'Holding Costs',
       'Deposit %', 'Mortgage Rate %', 'Initial Term (yrs)', 'Future Rate %', 'Mortgage Term (yrs)',
       'Rent/Month (BTL)', 'Nightly Rate (STL)', 'Occupancy % (STL)',
       'HMO Rooms', 'HMO Rent/Room', 'HMO Void Weeks/Room',
@@ -510,7 +534,11 @@ export function CalculatorScreen() {
         d.inputs.purchasePrice, d.inputs.estimatedFairValue || '', d.inputs.renovatedValue || '',
         d.inputs.epcRating || '', d.inputs.bedrooms || '',
         d.inputs.solicitorFees, d.inputs.mortgageFee, d.inputs.other,
-        d.inputs.refurbCost, d.inputs.refurbContingencyPct, d.inputs.holdingCosts || '',
+        d.inputs.refurbMode, d.inputs.refurbCost, d.inputs.refurbContingencyPct,
+        d.inputs.rd_ripOutSkip || '', d.inputs.rd_kitchen || '', d.inputs.rd_electrics || '', d.inputs.rd_bathroom || '',
+        d.inputs.rd_plastering || '', d.inputs.rd_internalDoors || '', d.inputs.rd_externalDoors || '', d.inputs.rd_windows || '',
+        d.inputs.rd_tiling || '', d.inputs.rd_carpet || '', d.inputs.rd_boilerHeating || '', d.inputs.rd_roof || '', d.inputs.rd_dampProofing || '',
+        d.inputs.holdingCosts || '',
         d.inputs.depositPct, d.inputs.interestRate, d.inputs.mortgageInitialTerm,
         d.inputs.mortgageFutureRate || '', d.inputs.mortgageTerm,
         d.inputs.rentPerMonth || '', d.inputs.nightlyRate || '', d.inputs.occupancyPct || '',
@@ -816,10 +844,10 @@ export function CalculatorScreen() {
                           <Text style={styles.soldColAddress} numberOfLines={2}>{s.address}</Text>
                           <Text style={styles.soldColType} numberOfLines={1}>{s.type}{s.newBuild ? '*' : ''}</Text>
                           <Text style={styles.soldColPrice}>{fmtGbp(s.price)}</Text>
-                          <Text style={styles.soldColDate}>{s.date ? new Date(s.date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : ''}</Text>
+                          <Text style={styles.soldColDate}>{s.date ? new Date(s.date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : ''}</Text>
                         </View>
                       ))}
-                      <Text style={styles.soldFootnote}>* New build   ·   Source: HM Land Registry</Text>
+                      <Text style={styles.soldFootnote}>* New build   ·   Source: HM Land Registry (data typically lags 2–3 months)</Text>
                     </View>
                   )}
                 </View>
@@ -829,7 +857,8 @@ export function CalculatorScreen() {
             {/* Flood Risk sub-tab */}
             {ddTab === 'flood' && (
               <View style={styles.card}>
-                {!floodRisk && !floodLoading && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up flood risk.</Text>}
+                {floodError && <Text style={styles.soldError}>{floodError}</Text>}
+                {!floodRisk && !floodLoading && !floodError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up flood risk.</Text>}
                 {floodLoading && !floodRisk && <Text style={styles.soldNone}>Looking up flood risk…</Text>}
                 {floodRisk && (
                   <>
@@ -974,7 +1003,7 @@ export function CalculatorScreen() {
                       </View>
                     </View>
                   )}
-                  <Text style={styles.floodDisclaimer}>Source: data.police.uk (UK street-level crime). Crimes are averaged over the last 7 months at the nearest reporting location.</Text>
+                  <Text style={styles.floodDisclaimer}>Source: data.police.uk (UK street-level crime). Crimes are averaged over the last {crimeData.monthsAnalysed} months at the nearest reporting location.</Text>
                 </View>
               </View>
             )}
@@ -1191,7 +1220,7 @@ export function CalculatorScreen() {
             </View>
             <View style={styles.guideSection}>
               <Text style={styles.guideHeading}>STL Rules (Short-Term Let)</Text>
-              <Text style={styles.guideBody}>In England, short-term lets (AirBnB) of entire homes now require planning permission if letting &gt;90 nights/year (from 2024 in some LPAs). Check local council rules. In London, the 90-day rule limits whole-property STLs. Scotland requires a licence. Higher returns but higher ongoing costs and management overhead.</Text>
+              <Text style={styles.guideBody}>In England, short-term lets (Airbnb) of entire homes now require planning permission if letting &gt;90 nights/year (from 2024 in some LPAs). Check local council rules. In London, the 90-day rule limits whole-property STLs. Scotland requires a licence. Higher returns but higher ongoing costs and management overhead.</Text>
             </View>
           </View>
         )}
@@ -1786,7 +1815,7 @@ export function CalculatorScreen() {
         {inputs.strategy === 'stl' && (
           <View style={styles.card}>
             <AccordionHeader
-              title="STL / AirBnB Costs"
+              title="STL / Airbnb Costs"
               summary="Setup & monthly running costs"
               open={!!openSections.stratCosts}
               onToggle={() => toggleSection('stratCosts')}
@@ -2048,7 +2077,7 @@ export function CalculatorScreen() {
               <>
                 <SectionDivider title={`Lender ICR (stress @ ${results.icr.stressRate.toFixed(1)}%)`} />
                 <ResultRow label="Interest Coverage" value={fmtPct(results.icr.ratio, 0)} highlight={results.icr.pass145} negative={!results.icr.pass125} />
-                <ResultRow label="125% test (basic rate / ltd co)" value={results.icr.pass125 ? '✓ Pass' : '✗ Fail'} highlight={results.icr.pass125} negative={!results.icr.pass125} />
+                <ResultRow label="125% test (standard threshold)" value={results.icr.pass125 ? '✓ Pass' : '✗ Fail'} highlight={results.icr.pass125} negative={!results.icr.pass125} />
                 <ResultRow label="145% test (higher rate)" value={results.icr.pass145 ? '✓ Pass' : '✗ Fail'} highlight={results.icr.pass145} negative={!results.icr.pass145} />
               </>
             )}
@@ -2181,10 +2210,10 @@ export function CalculatorScreen() {
       {/* Bottom navigation */}
       <View style={styles.bottomNav}>
         {([
-          { key: 'calculator', label: 'Calculator', icon: '⌗' },
+          { key: 'calculator', label: 'Calculator', icon: '🏠' },
           { key: 'duediligence', label: 'Due Diligence', icon: '🔍' },
-          { key: 'saved', label: `Saved${savedDeals.length > 0 ? ` (${savedDeals.length})` : ''}`, icon: '⊞' },
-          { key: 'guide', label: 'Guide', icon: '⊙' },
+          { key: 'saved', label: `Saved${savedDeals.length > 0 ? ` (${savedDeals.length})` : ''}`, icon: '📋' },
+          { key: 'guide', label: 'Guide', icon: '📖' },
         ] as { key: typeof view; label: string; icon: string }[]).map(tab => (
           <TouchableOpacity
             key={tab.key}

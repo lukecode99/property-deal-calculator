@@ -41,7 +41,7 @@ const STRAT_COLOR: Record<Strategy, string> = {
 const STRAT_LABEL: Record<Strategy, string> = {
   btl: 'Buy-to-Let',
   hmo: 'HMO',
-  stl: 'STL / AirBnB',
+  stl: 'STL / Airbnb',
 };
 
 function gbp(n: number, dp = 0): string {
@@ -56,10 +56,15 @@ async function fetchSoldPrices(postcode: string): Promise<SoldSale[]> {
   if (!postcode) return [];
   try {
     const pc = postcode.trim().toUpperCase().replace(/\s+/g, ' ');
-    const res = await fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`);
+    const res = await fetch(
+      `https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`,
+      { signal: AbortSignal.timeout(10000) },
+    );
     if (!res.ok) return [];
     const data = await res.json() as unknown;
-    return Array.isArray(data) ? (data as SoldSale[]).slice(0, 5) : [];
+    // Worker returns either SoldSale[] directly or { postcode, sales: SoldSale[] }
+    const arr = Array.isArray(data) ? (data as SoldSale[]) : ((data as any)?.sales ?? []);
+    return (arr as SoldSale[]).slice(0, 5);
   } catch {
     return [];
   }
@@ -539,7 +544,7 @@ ${results.icr ? `
 <h2>Lender ICR (stress @ ${results.icr.stressRate.toFixed(1)}%)</h2>
 <table>
   <tr><td>Interest Coverage</td><td style="color:${results.icr.pass125 ? '#166534' : '#dc2626'}">${pct(results.icr.ratio, 0)}</td></tr>
-  <tr><td>125% test (basic rate / ltd co)</td><td style="color:${results.icr.pass125 ? '#166534' : '#dc2626'}">${results.icr.pass125 ? '✓ Pass' : '✗ Fail'}</td></tr>
+  <tr><td>125% test (standard threshold)</td><td style="color:${results.icr.pass125 ? '#166534' : '#dc2626'}">${results.icr.pass125 ? '✓ Pass' : '✗ Fail'}</td></tr>
   <tr><td>145% test (higher rate)</td><td style="color:${results.icr.pass145 ? '#166534' : '#dc2626'}">${results.icr.pass145 ? '✓ Pass' : '✗ Fail'}</td></tr>
 </table>` : ''}
 
@@ -658,21 +663,23 @@ ${sections.map(s => s.html).join('\n')}
 export async function generateAndShareMultiDealPDF(deals: DealReportData[]): Promise<void> {
   const sections: DealSection[] = [];
   const calculated: DealReportData[] = [];
+  const cachedResults: NonNullable<ReturnType<typeof calcDeal>>[] = [];
+  const cachedSales: SoldSale[][] = [];
   for (const deal of deals) {
     const results = calcDeal(deal.inputs);
     if (!results) continue;
     const soldPrices = await fetchSoldPrices(deal.inputs.postcode).catch(() => []);
     calculated.push(deal);
+    cachedResults.push(results);
+    cachedSales.push(soldPrices);
     sections.push(dealSectionHtml(deal, results, soldPrices, calculated.length - 1, deals.length));
   }
   if (!sections.length) throw new Error('Could not calculate deal results');
-  // Re-number against the count that actually rendered
+  // Re-number against the count that actually rendered — reuse cached data, no re-fetch
   if (calculated.length !== deals.length) {
     sections.length = 0;
     for (let i = 0; i < calculated.length; i++) {
-      const results = calcDeal(calculated[i].inputs)!;
-      const soldPrices = await fetchSoldPrices(calculated[i].inputs.postcode).catch(() => []);
-      sections.push(dealSectionHtml(calculated[i], results, soldPrices, i, calculated.length));
+      sections.push(dealSectionHtml(calculated[i], cachedResults[i], cachedSales[i], i, calculated.length));
     }
   }
 
