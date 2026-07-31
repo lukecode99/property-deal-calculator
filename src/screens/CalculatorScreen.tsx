@@ -407,9 +407,14 @@ export function CalculatorScreen() {
   }
 
   useEffect(() => {
-    // Relative URL only resolves in the web build; skip fetch on native
-    if (Platform.OS !== 'web') return;
-    fetch('./market-data.json', { signal: AbortSignal.timeout(10000) })
+    // Native has no document base URL, so a relative path resolves to nothing and 404s
+    // silently — the sliders then sit on the hardcoded defaults and "Reset to market data"
+    // never appears. Point native at the deployed copy instead: gh-pages is where the daily
+    // "Update market data" job writes it, and it is the same file the web build reads.
+    const url = Platform.OS === 'web'
+      ? './market-data.json'
+      : 'https://lukecode99.github.io/property-deal-calculator/market-data.json';
+    fetch(url, { signal: AbortSignal.timeout(10000) })
       .then(r => r.json())
       .then((d: MarketData) => {
         setMarketData(d);
@@ -1205,7 +1210,7 @@ export function CalculatorScreen() {
             </View>
             <View style={styles.guideSection}>
               <Text style={styles.guideHeading}>HMO Licensing</Text>
-              <Text style={styles.guideBody}>Mandatory licence required if 5+ tenants from 2+ households share facilities. Many councils extend this to 3–4 tenants. Apply to your local authority — fees typically £500–£2,000, valid 5 years. Fire safety, adequate room sizes (&gt;6.51m²), and kitchen/bathroom ratios are enforced.</Text>
+              <Text style={styles.guideBody}>Mandatory licence required if 5+ tenants from 2+ households share facilities. Many councils extend this to 3–4 tenants. Apply to your local authority — fees typically £500–£2,000, valid 5 years. Fire safety, adequate room sizes ({'>'}6.51m²), and kitchen/bathroom ratios are enforced.</Text>
             </View>
             <View style={styles.guideSection}>
               <Text style={styles.guideHeading}>Section 24 (Personal Ownership)</Text>
@@ -1221,7 +1226,7 @@ export function CalculatorScreen() {
             </View>
             <View style={styles.guideSection}>
               <Text style={styles.guideHeading}>STL Rules (Short-Term Let)</Text>
-              <Text style={styles.guideBody}>In England, short-term lets (Airbnb) of entire homes now require planning permission if letting &gt;90 nights/year (from 2024 in some LPAs). Check local council rules. In London, the 90-day rule limits whole-property STLs. Scotland requires a licence. Higher returns but higher ongoing costs and management overhead.</Text>
+              <Text style={styles.guideBody}>In England, short-term lets (Airbnb) of entire homes now require planning permission if letting {'>'}90 nights/year (from 2024 in some LPAs). Check local council rules. In London, the 90-day rule limits whole-property STLs. Scotland requires a licence. Higher returns but higher ongoing costs and management overhead.</Text>
             </View>
           </View>
         )}
