@@ -31,61 +31,6 @@
       "bundler": "metro",
       "output": "single"
     },
-    "plugins": [
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
-          "iosAppId": "ca-app-pub-9879821077971587~8910284473",
-          "skAdNetworkItems": [
-            "cstr6suwn9.skadnetwork",
-            "4fzdc2evr5.skadnetwork",
-            "4pfyvq9l8r.skadnetwork",
-            "2fnua5tdw4.skadnetwork",
-            "ydx93a7ass.skadnetwork",
-            "5a6flpkh64.skadnetwork",
-            "p78axxw29g.skadnetwork",
-            "v72qych5uu.skadnetwork",
-            "ludvb6cv63.skadnetwork",
-            "cp8zw746q7.skadnetwork",
-            "c6k4g5qg8m.skadnetwork",
-            "s39g8k73mm.skadnetwork",
-            "3qy4746246.skadnetwork",
-            "3sh42y64l3.skadnetwork",
-            "f38h382jlk.skadnetwork",
-            "hs6bdukanm.skadnetwork",
-            "prcb7njfa6.skadnetwork",
-            "v4nxqhlyqp.skadnetwork",
-            "wzmmz9fp6w.skadnetwork",
-            "yclnxrl5pm.skadnetwork",
-            "t38b2kh725.skadnetwork",
-            "7ug5zh24hu.skadnetwork",
-            "9rd848q2bk.skadnetwork",
-            "y5ghdn53zk.skadnetwork",
-            "n6d9k2essl.skadnetwork",
-            "v9wttpbfk9.skadnetwork",
-            "n38lu8286q.skadnetwork",
-            "47vhws6wlr.skadnetwork",
-            "kbd757ywx3.skadnetwork",
-            "9t245vhmpl.skadnetwork",
-            "a2p9lx4jpn.skadnetwork",
-            "22mmun2rn5.skadnetwork",
-            "4468km3ulz.skadnetwork",
-            "2u9pt9hc89.skadnetwork",
-            "8s468mfl3y.skadnetwork",
-            "klf5c3l5u5.skadnetwork",
-            "ppxm28t8ap.skadnetwork",
-            "ecpz2srf59.skadnetwork",
-            "uw77j35x4d.skadnetwork",
-            "6xzpu9s2p8.skadnetwork",
-            "f73kdq92p3.skadnetwork",
-            "i41wp69x9t.skadnetwork",
-            "5l3tkt5rp5.skadnetwork",
-            "bvpn9ufa9b.skadnetwork",
-            "gta9lk7p23.skadnetwork"
-          ]
-        }
-      ]
-    ]
+    "plugins": []
   }
 }
