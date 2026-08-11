@@ -1,0 +1,31 @@
+diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+index 2a67797..1243432 100644
+--- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
++++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+@@ -457,7 +457,25 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     nativeMethodCallInvoker_->invokeAsync(methodNameStr, [moduleName, methodNameStr, block]() -> void {
+       TraceSection s(
+           "RCTTurboModuleAsyncMethodInvocation", "module", moduleName, "method", methodNameStr, "returnType", "void");
+-      block();
++      // iOS 26 launch-crash guard (RN issue #54859): a native module's void async
++      // method can throw an NSException at startup, which performVoidMethodInvocation
++      // converts to a C++ jsi error and rethrows here — on a background queue where
++      // nothing catches it, so std::terminate aborts the app instantly. Swallow and
++      // log instead of aborting; the failing module no-ops but the app launches.
++      try {
++        block();
++      } catch (const std::exception &e) {
++        RCTLogError(
++            @"[TurboModule] uncaught exception in async void method %s.%s: %s",
++            moduleName,
++            methodNameStr.c_str(),
++            e.what());
++      } catch (...) {
++        RCTLogError(
++            @"[TurboModule] uncaught non-std exception in async void method %s.%s",
++            moduleName,
++            methodNameStr.c_str());
++      }
+     });
+   }
+ }
