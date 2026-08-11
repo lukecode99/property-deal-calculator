@@ -517,7 +517,8 @@ ${verdictBannerHtml(results, stratLabel, isBRR)}
 ${perYearTableHtml(results.projection5yr.years)}
 <table style="margin-top:8px">
   <tr><td>Estimated Property Value (${deal.inputs.capitalGrowthPct || '3'}% pa)</td><td>${gbp(results.projection5yr.estimatedValue)}</td></tr>
-  <tr><td>Capital Growth Over 5 Years</td><td>${gbp(results.projection5yr.capitalGrowth)}</td></tr>
+  ${results.projection5yr.equityCreated != null ? `<tr><td>Equity Created by Refurb</td><td>${gbp(results.projection5yr.equityCreated)}</td></tr>` : ''}
+  <tr><td>Capital Growth Over 5 Years (market)</td><td>${gbp(results.projection5yr.capitalGrowth)}</td></tr>
   <tr><td>Cumulative Net Cashflow</td><td>${gbp(results.projection5yr.cumulativeCashflow)}</td></tr>
   <tr class="total"><td>Total 5-Year Return</td><td>${gbp(results.projection5yr.totalReturn)}</td></tr>
 </table>

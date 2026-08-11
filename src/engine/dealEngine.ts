@@ -175,6 +175,13 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
   const fairValue = n(inputs.estimatedFairValue);
   const capitalOnPurchase = fairValue > 0 ? fairValue - price : undefined;
 
+  // Equity created by the refurb (forced appreciation): what it's worth after the
+  // refurb (GDV) minus what you paid and spent to get it there. Independent of the
+  // refinance toggle — the manufactured equity exists whether or not you pull it out.
+  const renovatedValueInput = n(inputs.renovatedValue);
+  const equityCreated =
+    renovatedValueInput > 0 ? renovatedValueInput - price - refurb : undefined;
+
   // BRR: new mortgage after refurb
   let newMortgageAmount: number | undefined;
   let monthlyPostRefiMortgage: number | undefined;
@@ -303,12 +310,12 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
       netCashflow: adjNet,
       cumulativeCashflow,
       capitalGrowth: yrCapitalGrowth,
-      totalReturn: yrCapitalGrowth + cumulativeCashflow,
+      totalReturn: yrCapitalGrowth + cumulativeCashflow + (equityCreated ?? 0),
       estimatedValue: baseValueForGrowth * Math.pow(1 + growth, yr),
     });
   }
 
-  const totalReturn = capitalGrowth + cumulativeCashflow;
+  const totalReturn = capitalGrowth + cumulativeCashflow + (equityCreated ?? 0);
 
   return {
     stampDuty,
@@ -316,6 +323,7 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     totalPurchaseCosts,
     totalInvested,
     capitalOnPurchase,
+    equityCreated,
     detailedRefurbTotal,
     refurbTotal: refurb,
     holdingCosts,
@@ -354,6 +362,7 @@ export function calcDeal(inputs: DealInputs, extras: DealExtras = {}): DealResul
     projection5yr: {
       estimatedValue,
       capitalGrowth,
+      equityCreated,
       cumulativeCashflow,
       totalReturn,
       years: projectionYears,

@@ -505,6 +505,7 @@ export function CalculatorScreen() {
       'Total Purchase Costs (deposit + SDLT + solicitor + fee + other)',
       'Total Invested (purchase costs + refurb + holding + STL/HMO setup + initial financing)',
       'Capital on Purchase (fair value − price)',
+      'Equity Created (GDV − price − refurb)',
       // ── BRR / refinance ────────────────────────────────────
       'New Mortgage Amount (BRR)', 'Post-Refi Monthly Mortgage (BRR)',
       'Value Extracted (BRR)', 'Capital Left In (BRR)', 'All Capital Out (BRR)',
@@ -563,6 +564,7 @@ export function CalculatorScreen() {
         r ? g(r.totalPurchaseCosts) : '',
         r ? g(r.totalInvested) : g(d.totalInvested),
         r?.capitalOnPurchase != null ? g(r.capitalOnPurchase) : '',
+        r?.equityCreated != null ? g(r.equityCreated) : '',
         // BRR / refinance
         r?.newMortgageAmount != null ? g(r.newMortgageAmount) : '',
         r?.monthlyPostRefiMortgage != null ? g(r.monthlyPostRefiMortgage) : '',
@@ -2053,6 +2055,14 @@ export function CalculatorScreen() {
                 negative={results.capitalOnPurchase < 0}
               />
             )}
+            {results.equityCreated != null && (
+              <ResultRow
+                label="Equity Created (refurb)"
+                value={fmtGbp(results.equityCreated)}
+                highlight={results.equityCreated > 0}
+                negative={results.equityCreated < 0}
+              />
+            )}
             <ResultRow
               label={inputs.refinanceAfterRefurb === 'yes' && inputs.brrPurchaseMethod !== 'mortgage' ? 'Cash to Complete' : 'Deposit'}
               value={fmtGbp(results.deposit)}
@@ -2162,7 +2172,10 @@ export function CalculatorScreen() {
             {showProjection && (
               <View style={styles.stressBox}>
                 <ResultRow label="Estimated Value" value={fmtGbp(results.projection5yr.estimatedValue)} />
-                <ResultRow label="Capital Growth" value={fmtGbp(results.projection5yr.capitalGrowth)} highlight />
+                {results.projection5yr.equityCreated != null && (
+                  <ResultRow label="Equity Created (refurb)" value={fmtGbp(results.projection5yr.equityCreated)} highlight={results.projection5yr.equityCreated > 0} negative={results.projection5yr.equityCreated < 0} />
+                )}
+                <ResultRow label="Capital Growth (market)" value={fmtGbp(results.projection5yr.capitalGrowth)} highlight />
                 <ResultRow label="Cumulative Cashflow" value={fmtGbp(results.projection5yr.cumulativeCashflow)} highlight={results.projection5yr.cumulativeCashflow > 0} negative={results.projection5yr.cumulativeCashflow < 0} />
                 <ResultRow label="Total 5yr Return" value={fmtGbp(results.projection5yr.totalReturn)} highlight />
               </View>

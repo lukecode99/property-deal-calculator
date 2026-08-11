@@ -138,6 +138,7 @@ export interface DealResults {
   totalPurchaseCosts: number;
   totalInvested: number;
   capitalOnPurchase?: number;
+  equityCreated?: number;      // forced appreciation: GDV − purchase price − refurb (incl. contingency)
   detailedRefurbTotal?: number;
   refurbTotal: number;         // refurb incl. contingency — the figure added into totalInvested
   holdingCosts: number;
@@ -204,6 +205,7 @@ export interface DealResults {
   projection5yr: {
     estimatedValue: number;
     capitalGrowth: number;
+    equityCreated?: number;     // manufactured equity, included in totalReturn
     cumulativeCashflow: number;
     totalReturn: number;
     // Year-by-year values matching the engine's compounding growth and
