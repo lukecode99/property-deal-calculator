@@ -157,73 +157,85 @@ if [[ "${INSTALLED}" != "1" ]]; then
 fi
 ok "App installed."
 
-# Launch standalone off the embedded Release bundle.
+# Launch standalone off the embedded Release bundle. This first launch also
+# initialises the app's on-disk storage, which we seed below.
 xcrun simctl terminate "${UDID}" "${BUNDLE_ID}" 2>/dev/null || true
 xcrun simctl launch "${UDID}" "${BUNDLE_ID}" >/dev/null 2>&1 || true
-sleep 6
+sleep 8
 ok "App launched standalone."
 
+# =============================================================== SEED DEMO DATA
+# Store shots need a populated deal, not an empty form. This app restores its
+# inputs from AsyncStorage (key below), MERGING over its built-in defaults - so
+# we write a small overrides JSON straight into the app's storage and relaunch.
+# Reuse for another app: set SEED_KEY + SEED_INPUTS (or SEED_INPUTS='' to skip).
+SEED_KEY="${SEED_KEY:-pdc:lastInputs:v1}"
+SEED_INPUTS="${SEED_INPUTS:-{\"strategy\":\"btl\",\"purchasePrice\":\"250000\",\"estimatedFairValue\":\"260000\",\"rentPerMonth\":\"1450\",\"depositPct\":\"25\",\"interestRate\":\"5.5\",\"furtherDetails\":\"yes\",\"epcRating\":\"C\",\"floorSpace\":\"85\",\"bedrooms\":\"3\",\"bathrooms\":\"1\",\"refurbCost\":\"5000\"}}"
+if [[ -n "${SEED_INPUTS}" ]]; then
+  log "Seeding an example deal so the screenshots aren't empty..."
+  DATA_DIR=$(xcrun simctl get_app_container "${UDID}" "${BUNDLE_ID}" data 2>/dev/null || true)
+  MANIFEST=$(find "${DATA_DIR}" -name manifest.json -path '*RCTAsyncLocalStorage*' 2>/dev/null | head -1 || true)
+  [[ -z "${MANIFEST}" ]] && MANIFEST=$(find "${DATA_DIR}" -name manifest.json 2>/dev/null | head -1 || true)
+  if [[ -z "${MANIFEST}" ]]; then
+    SDIR="${DATA_DIR}/Documents/RCTAsyncLocalStorage_V1"; mkdir -p "${SDIR}"
+    MANIFEST="${SDIR}/manifest.json"; echo '{}' > "${MANIFEST}"
+  fi
+  # Merge our key into the existing manifest (small values live inline as strings).
+  node -e 'const fs=require("fs");const f=process.argv[1];let m={};try{m=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}m[process.argv[2]]=process.argv[3];fs.writeFileSync(f,JSON.stringify(m));' \
+    "${MANIFEST}" "${SEED_KEY}" "${SEED_INPUTS}" && ok "Seed written to $(basename "$(dirname "${MANIFEST}")")/manifest.json"
+  xcrun simctl terminate "${UDID}" "${BUNDLE_ID}" 2>/dev/null || true
+  xcrun simctl launch "${UDID}" "${BUNDLE_ID}" >/dev/null 2>&1 || true
+  sleep 8
+  ok "Example deal loaded."
+fi
+
 # ============================================================== PER-APP FLOWS
-# Edit ONLY this block for a different app. Each flow is self-contained
-# (relaunches the app), so one bad step doesn't poison the others; the runner
-# below tolerates a failing flow and reports which captured. Prefer generic
-# swipes and tab labels over brittle exact-text asserts.
+# Edit ONLY this block for a different app. Maestro just NAVIGATES here (scrolls
+# to a section); the screenshot itself is taken by simctl in the capture loop
+# below, which avoids Maestro's "path resolves outside the run folder" sandbox.
+# Each flow relaunches the app (scroll resets to top), so they're independent.
+# Prefer scrollUntilVisible on a stable on-screen heading over pixel swipes.
+#
+# SHOTS maps each flow file to its output name; keep the two in sync.
+SHOTS=( "01-overview" "02-results" "03-costs" "04-returns" "05-stress" )
 
-cat > "${FLOWDIR}/01-calculator.yaml" <<YAML
+# 01 - top of the form (title + inputs), no scroll.
+cat > "${FLOWDIR}/01-overview.yaml" <<YAML
 appId: ${BUNDLE_ID}
 ---
 - launchApp: { clearState: false }
-- waitForAnimationToEnd: { timeout: 8000 }
-- takeScreenshot: ${OUTDIR}/01-calculator
+- waitForAnimationToEnd: { timeout: 6000 }
 YAML
 
-cat > "${FLOWDIR}/02-results.yaml" <<YAML
+# Helper text for the scroll flows: scroll DOWN until a heading is on screen.
+mk_scroll_flow(){  # $1 = flow file, $2 = heading text
+  cat > "$1" <<YAML
 appId: ${BUNDLE_ID}
 ---
 - launchApp: { clearState: false }
-- waitForAnimationToEnd: { timeout: 8000 }
-- swipe: { direction: UP }
-- swipe: { direction: UP }
-- takeScreenshot: ${OUTDIR}/02-results
+- waitForAnimationToEnd: { timeout: 6000 }
+- scrollUntilVisible:
+    element:
+      text: "$2"
+    direction: DOWN
+    timeout: 20000
+- waitForAnimationToEnd: { timeout: 2000 }
 YAML
-
-cat > "${FLOWDIR}/03-strategy.yaml" <<YAML
-appId: ${BUNDLE_ID}
----
-- launchApp: { clearState: false }
-- waitForAnimationToEnd: { timeout: 8000 }
-- runFlow:
-    when: { visible: "HMO" }
-    commands:
-      - tapOn: "HMO"
-- takeScreenshot: ${OUTDIR}/03-strategy
-YAML
-
-cat > "${FLOWDIR}/04-duediligence.yaml" <<YAML
-appId: ${BUNDLE_ID}
----
-- launchApp: { clearState: false }
-- waitForAnimationToEnd: { timeout: 8000 }
-- tapOn: "Due Diligence"
-- waitForAnimationToEnd: { timeout: 8000 }
-- takeScreenshot: ${OUTDIR}/04-duediligence
-YAML
-
-cat > "${FLOWDIR}/05-guide.yaml" <<YAML
-appId: ${BUNDLE_ID}
----
-- launchApp: { clearState: false }
-- waitForAnimationToEnd: { timeout: 8000 }
-- tapOn: "Guide"
-- waitForAnimationToEnd: { timeout: 8000 }
-- takeScreenshot: ${OUTDIR}/05-guide
-YAML
+}
+mk_scroll_flow "${FLOWDIR}/02-results.yaml" "Results"
+mk_scroll_flow "${FLOWDIR}/03-costs.yaml"   "Costs Summary"
+mk_scroll_flow "${FLOWDIR}/04-returns.yaml" "Returns"
+mk_scroll_flow "${FLOWDIR}/05-stress.yaml"  "Stress Test"
 # ============================================================ END PER-APP FLOWS
 
 log "Capturing screenshots..."
-for f in 01-calculator 02-results 03-strategy 04-duediligence 05-guide; do
-  if maestro test "${FLOWDIR}/${f}.yaml"; then ok "captured ${f}"
-  else printf "\033[1;33m! %s had a problem - continuing with the rest\033[0m\n" "${f}"; fi
+for f in "${SHOTS[@]}"; do
+  if maestro test "${FLOWDIR}/${f}.yaml"; then :
+  else printf "\033[1;33m! %s navigation had a problem - grabbing whatever is on screen\033[0m\n" "${f}"; fi
+  sleep 1
+  # simctl captures the current sim screen at native 1320x2868 - no path sandbox.
+  if xcrun simctl io "${UDID}" screenshot "${OUTDIR}/${f}.png" >/dev/null 2>&1; then ok "captured ${f}"
+  else printf "\033[1;31mX could not capture %s\033[0m\n" "${f}"; fi
 done
 
 # ---------------------------------------------------------------- 6. verify
