@@ -1,4 +1,5 @@
 import * as Print from 'expo-print';
+import { timeoutSignal } from './timeoutSignal';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { calcDeal } from '../engine/dealEngine';
@@ -58,7 +59,7 @@ async function fetchSoldPrices(postcode: string): Promise<SoldSale[]> {
     const pc = postcode.trim().toUpperCase().replace(/\s+/g, ' ');
     const res = await fetch(
       `https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`,
-      { signal: AbortSignal.timeout(10000) },
+      { signal: timeoutSignal(10000) },
     );
     if (!res.ok) return [];
     const data = await res.json() as unknown;
