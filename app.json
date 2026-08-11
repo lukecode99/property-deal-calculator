@@ -2,6 +2,7 @@
   "expo": {
     "name": "Property Deal Calculator",
     "slug": "property-deal-calculator",
+    "newArchEnabled": false,
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
