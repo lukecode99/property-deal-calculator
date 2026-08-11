@@ -66,6 +66,25 @@ if ! command -v maestro >/dev/null 2>&1; then
 fi
 export PATH="${PATH}:${HOME}/.maestro/bin"
 command -v maestro >/dev/null 2>&1 || fail "Maestro install failed. See https://maestro.mobile.dev"
+
+# Maestro is a JVM app - it needs a JDK. macOS ships none by default.
+if ! /usr/libexec/java_home >/dev/null 2>&1 && ! command -v java >/dev/null 2>&1; then
+  log "Installing Java (Maestro's UI driver needs a JDK)..."
+  if command -v brew >/dev/null 2>&1; then brew install openjdk@17
+  else fail "Java missing and Homebrew not found. Install Temurin JDK 17 (https://adoptium.net) and re-run."; fi
+fi
+# brew's openjdk is keg-only (not linked) - put it on PATH/JAVA_HOME explicitly.
+if command -v brew >/dev/null 2>&1; then
+  for JV in openjdk@17 openjdk; do
+    JP="$(brew --prefix "${JV}" 2>/dev/null || true)"
+    if [[ -n "${JP}" && -x "${JP}/bin/java" ]]; then
+      export PATH="${JP}/bin:${PATH}"
+      export JAVA_HOME="${JP}/libexec/openjdk.jdk/Contents/Home"
+      break
+    fi
+  done
+fi
+command -v java >/dev/null 2>&1 || /usr/libexec/java_home >/dev/null 2>&1 || fail "Java still not found after install - install Temurin JDK 17 (https://adoptium.net) and re-run."
 ok "All tools present."
 
 mkdir -p "${WORKDIR}" "${OUTDIR}" "${FLOWDIR}"
