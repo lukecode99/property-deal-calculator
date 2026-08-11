@@ -170,7 +170,7 @@ ok "App launched standalone."
 # we write a small overrides JSON straight into the app's storage and relaunch.
 # Reuse for another app: set SEED_KEY + SEED_INPUTS (or SEED_INPUTS='' to skip).
 SEED_KEY="${SEED_KEY:-pdc:lastInputs:v1}"
-SEED_INPUTS="${SEED_INPUTS:-{\"strategy\":\"btl\",\"purchasePrice\":\"250000\",\"estimatedFairValue\":\"260000\",\"rentPerMonth\":\"1450\",\"depositPct\":\"25\",\"interestRate\":\"5.5\",\"furtherDetails\":\"yes\",\"epcRating\":\"C\",\"floorSpace\":\"85\",\"bedrooms\":\"3\",\"bathrooms\":\"1\",\"refurbCost\":\"5000\"}}"
+SEED_INPUTS="${SEED_INPUTS:-{\"strategy\":\"brr\",\"refinanceAfterRefurb\":\"yes\",\"brrPurchaseMethod\":\"bridge\",\"purchasePrice\":\"100000\",\"estimatedFairValue\":\"120000\",\"renovatedValue\":\"200000\",\"refurbCost\":\"30000\",\"rentPerMonth\":\"1195\",\"interestRate\":\"5.5\",\"newMortgagePct\":\"75\",\"furtherDetails\":\"yes\",\"epcRating\":\"D\",\"floorSpace\":\"85\",\"bedrooms\":\"3\",\"bathrooms\":\"1\"}}"
 if [[ -n "${SEED_INPUTS}" ]]; then
   log "Seeding an example deal so the screenshots aren't empty..."
   DATA_DIR=$(xcrun simctl get_app_container "${UDID}" "${BUNDLE_ID}" data 2>/dev/null || true)
