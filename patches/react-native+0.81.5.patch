@@ -1,8 +1,31 @@
 diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
-index 2a67797..1243432 100644
+index 2a67797..d1c6dbb 100644
 --- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
 +++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
-@@ -457,7 +457,25 @@ void ObjCTurboModule::performVoidMethodInvocation(
+@@ -435,7 +435,21 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     @try {
+       [inv invokeWithTarget:strongModule];
+     } @catch (NSException *exception) {
+-      throw convertNSExceptionToJSError(runtime, exception, std::string{moduleName}, methodNameStr);
++      // iOS 26 launch-crash fix (RN issue #54859): for an ASYNC void method there is
++      // no JS call frame to receive a thrown error. Throwing here makes the C++
++      // exception unwind across the ObjC @finally boundary on a background queue,
++      // which objc_exception_rethrow turns into std::terminate -> abort (matches the
++      // .ips: terminate <- objc_exception_rethrow <- performVoidMethodInvocation block).
++      // Only rethrow on the sync path (JS can catch it there); otherwise log and swallow.
++      if (shouldVoidMethodsExecuteSync_) {
++        throw convertNSExceptionToJSError(runtime, exception, std::string{moduleName}, methodNameStr);
++      } else {
++        RCTLogError(
++            @"[TurboModule] async void method %s.%s threw at launch and was swallowed: %@",
++            moduleName,
++            methodNameStr.c_str(),
++            exception.reason);
++      }
+     } @finally {
+       [retainedObjectsForInvocation removeAllObjects];
+     }
+@@ -457,7 +471,25 @@ void ObjCTurboModule::performVoidMethodInvocation(
      nativeMethodCallInvoker_->invokeAsync(methodNameStr, [moduleName, methodNameStr, block]() -> void {
        TraceSection s(
            "RCTTurboModuleAsyncMethodInvocation", "module", moduleName, "method", methodNameStr, "returnType", "void");
