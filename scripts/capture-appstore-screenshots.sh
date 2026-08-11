@@ -68,25 +68,23 @@ export PATH="${PATH}:${HOME}/.maestro/bin"
 command -v maestro >/dev/null 2>&1 || fail "Maestro install failed. See https://maestro.mobile.dev"
 
 # Maestro is a JVM app - it needs a JDK. macOS ships a /usr/bin/java STUB that
-# always exists (it's what prints "Unable to locate a Java Runtime"), so we must
-# test whether java actually RUNS, not whether the command exists.
+# always exists (it's what prints "Unable to locate a Java Runtime"), so we test
+# whether java actually RUNS, not whether the command exists. We install the
+# Temurin *cask* (a real SYSTEM JDK under /Library/Java) rather than the keg-only
+# openjdk formula: the system JDK is found automatically by /usr/libexec/java_home
+# and by the /usr/bin/java stub, so no PATH/JAVA_HOME gymnastics are needed and
+# Maestro finds it too. (brew --cask temurin prompts once for your login password.)
 if ! java -version >/dev/null 2>&1; then
-  log "Installing Java (Maestro's UI driver needs a JDK)..."
-  if command -v brew >/dev/null 2>&1; then brew install openjdk@17
-  else fail "Java missing and Homebrew not found. Install Temurin JDK 17 (https://adoptium.net) and re-run."; fi
+  log "Installing Java (Maestro's UI driver needs a JDK - you may be asked for your Mac password)..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install --cask temurin@17 || brew install --cask temurin
+  else
+    fail "Java missing and Homebrew not found. Install Temurin JDK 17 (https://adoptium.net) and re-run."
+  fi
 fi
-# brew's openjdk is keg-only (not linked, and shadowed by the /usr/bin stub) -
-# put it FIRST on PATH and set JAVA_HOME explicitly so java and Maestro find it.
-if command -v brew >/dev/null 2>&1; then
-  for JV in openjdk@17 openjdk; do
-    JP="$(brew --prefix "${JV}" 2>/dev/null || true)"
-    if [[ -n "${JP}" && -x "${JP}/bin/java" ]]; then
-      export PATH="${JP}/bin:${PATH}"
-      export JAVA_HOME="${JP}/libexec/openjdk.jdk/Contents/Home"
-      break
-    fi
-  done
-fi
+# Point JAVA_HOME at whatever the system now resolves (system JDK, incl. Temurin).
+JH="$(/usr/libexec/java_home 2>/dev/null || true)"
+[[ -n "${JH}" ]] && export JAVA_HOME="${JH}" && export PATH="${JH}/bin:${PATH}"
 java -version >/dev/null 2>&1 || fail "Java still not runnable after install - install Temurin JDK 17 (https://adoptium.net) and re-run."
 ok "All tools present."
 
