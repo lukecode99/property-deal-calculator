@@ -505,7 +505,7 @@ export function CalculatorScreen() {
       'Total Purchase Costs (deposit + SDLT + solicitor + fee + other)',
       'Total Invested (purchase costs + refurb + holding + STL/HMO setup + initial financing)',
       'Capital on Purchase (fair value − price)',
-      'Equity Created (GDV − price − refurb)',
+      'Equity from Refurb (GDV − price − refurb)',
       // ── BRR / refinance ────────────────────────────────────
       'New Mortgage Amount (BRR)', 'Post-Refi Monthly Mortgage (BRR)',
       'Value Extracted (BRR)', 'Capital Left In (BRR)', 'All Capital Out (BRR)',
@@ -2057,7 +2057,7 @@ export function CalculatorScreen() {
             )}
             {results.equityCreated != null && (
               <ResultRow
-                label="Equity Created (refurb)"
+                label="Equity from Refurb"
                 value={fmtGbp(results.equityCreated)}
                 highlight={results.equityCreated > 0}
                 negative={results.equityCreated < 0}
@@ -2173,7 +2173,7 @@ export function CalculatorScreen() {
               <View style={styles.stressBox}>
                 <ResultRow label="Estimated Value" value={fmtGbp(results.projection5yr.estimatedValue)} />
                 {results.projection5yr.equityCreated != null && (
-                  <ResultRow label="Equity Created (refurb)" value={fmtGbp(results.projection5yr.equityCreated)} highlight={results.projection5yr.equityCreated > 0} negative={results.projection5yr.equityCreated < 0} />
+                  <ResultRow label="Equity from Refurb" value={fmtGbp(results.projection5yr.equityCreated)} highlight={results.projection5yr.equityCreated > 0} negative={results.projection5yr.equityCreated < 0} />
                 )}
                 <ResultRow label="Capital Growth (market)" value={fmtGbp(results.projection5yr.capitalGrowth)} highlight />
                 <ResultRow label="Cumulative Cashflow" value={fmtGbp(results.projection5yr.cumulativeCashflow)} highlight={results.projection5yr.cumulativeCashflow > 0} negative={results.projection5yr.cumulativeCashflow < 0} />
