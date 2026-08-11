@@ -243,7 +243,29 @@ echo
 if [[ "${BAD}" == "0" ]]; then ok "All screenshots are the right size."
 else printf "\033[1;33mSome sizes are off - send them anyway, I'll tell you which to redo.\033[0m\n"; fi
 
+# ---------------------------------------------------------------- 7. hand off
+# Bundle the shots (+ build log for debugging) and upload to a temp host so Nano
+# can pull them from one link - no dragging files into chat.
+cp "${BUILD_LOG}" "${OUTDIR}/build.log" 2>/dev/null || true
+ARCHIVE="${WORKDIR}/appstore-shots.tgz"
+tar -C "${OUTDIR}" -czf "${ARCHIVE}" . 2>/dev/null || true
+log "Uploading results so Nano can pull them..."
+URL=""
+if [[ -f "${ARCHIVE}" ]]; then
+  URL=$(curl -fsS -A "nano-shots/1.0" -F "file=@${ARCHIVE}" https://0x0.st 2>/dev/null | tr -d '\n' || true)
+  if [[ -z "${URL}" || "${URL}" != http* ]]; then
+    URL=$(curl -fsS -F "file=@${ARCHIVE}" https://file.io 2>/dev/null | grep -oE 'https://file\.io/[A-Za-z0-9]+' | head -1 || true)
+  fi
+fi
+echo
+if [[ -n "${URL}" && "${URL}" == http* ]]; then
+  printf "\033[1;32m================ COPY THIS ONE LINE TO NANO ================\033[0m\n"
+  printf "\033[1;33mSHOTS: %s\033[0m\n" "${URL}"
+  printf "\033[1;32m===========================================================\033[0m\n"
+else
+  printf "\033[1;33mAuto-upload failed - just drag the PNGs from the Finder window into the chat.\033[0m\n"
+fi
+
 open "${OUTDIR}"
 echo
 echo "Done. The PNGs are in:  ${OUTDIR}"
-echo "Send me those files and I'll upload them to App Store Connect."
