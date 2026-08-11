@@ -15,6 +15,7 @@ import { InputField } from '../components/InputField';
 import { SliderField } from '../components/SliderField';
 import { ResultRow, SectionDivider, fmtGbp, fmtPct } from '../components/ResultRow';
 import { generateAndShareDealPDF, generateAndShareMultiDealPDF } from '../utils/generateDealReport';
+import { timeoutSignal } from '../utils/timeoutSignal';
 
 interface ForwardRateTenor { baseRate: number; btlRate: number; }
 interface MarketData {
@@ -295,7 +296,7 @@ export function CalculatorScreen() {
     setSoldLoading(true);
     setSoldError(null);
     setSoldPrices(null);
-    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+    fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
       .then(r => r.json())
       .then((d: any) => {
         if (d.error) throw new Error(d.error);
@@ -308,7 +309,7 @@ export function CalculatorScreen() {
       setFloodRisk(null);
       setFloodLoading(true);
       setFloodError(null);
-      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
         .then(r => r.json())
         .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
         .catch(e => setFloodError(e.message ?? 'Flood risk lookup failed'))
@@ -337,56 +338,56 @@ export function CalculatorScreen() {
     setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
     // Existence gate — validate postcode via postcodes.io before firing all workers.
     // Non-existent postcodes pass the regex but return 404 from the API.
-    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
       .then(r => r.json())
       .then((geo: any) => {
         if (!geo.result) throw new Error('Postcode not found — check and try again');
         const { latitude: lat, longitude: lon } = geo.result;
         // Postcode confirmed — fire all workers in parallel
         // Sold prices
-        fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://sold-prices.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setSoldPrices(d.sales ?? []); })
           .catch(e => setSoldError(`Sold prices: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setSoldLoading(false));
         // Flood risk
-        fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
           .catch(e => setFloodError(`Flood risk: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setFloodLoading(false));
         // Planning
-        fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setPlanningData(d.applications ?? []); setPlanningNote(d.note ?? null); setPlanningCouncil(d.council ?? ''); })
           .catch(e => setPlanningError(`Planning: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setPlanningLoading(false));
         // EPC ratings
-        fetch(`https://epc.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://epc.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setEpcData(d.results ?? []); })
           .catch(e => setEpcError(`EPC: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setEpcLoading(false));
         // Crime
-        fetch(`https://crime.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://crime.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setCrimeData(d); })
           .catch(e => setCrimeError(`Crime data: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setCrimeLoading(false));
         // Transport
-        fetch(`https://transport.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://transport.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setTransportData(d); })
           .catch(e => setTransportError(`Transport: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setTransportLoading(false));
         // Rental benchmarks (LHA + employment)
-        fetch(`https://rental.nanoluke521.workers.dev/?v=5&postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://rental.nanoluke521.workers.dev/?v=5&postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setRentalData(d); })
           .catch(e => setRentalError(`Rental data: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setRentalLoading(false));
         // Schools — use lat/lon already returned by the gate
-        fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lon}&radius=2`, { signal: AbortSignal.timeout(10000) })
+        fetch(`https://schools.nanoluke521.workers.dev/?lat=${lat}&lon=${lon}&radius=2`, { signal: timeoutSignal(10000) })
           .then(r => r.json())
           .then((d: any) => { if (d.error) throw new Error(d.error); setSchoolsData((d.schools ?? []).slice(0, 10)); })
           .catch(e => setSchoolsError(`Schools: ${e.message ?? 'network error'} — tap Search to retry`))
@@ -414,7 +415,7 @@ export function CalculatorScreen() {
     const url = Platform.OS === 'web'
       ? './market-data.json'
       : 'https://lukecode99.github.io/property-deal-calculator/market-data.json';
-    fetch(url, { signal: AbortSignal.timeout(10000) })
+    fetch(url, { signal: timeoutSignal(10000) })
       .then(r => r.json())
       .then((d: MarketData) => {
         setMarketData(d);
@@ -442,7 +443,7 @@ export function CalculatorScreen() {
     const timer = setTimeout(() => {
       setFloodLoading(true);
       setFloodError(null);
-      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+      fetch(`https://flood-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
         .then(r => r.json())
         .then((d: any) => { if (!d.error) setFloodRisk({ level: d.level, zone: d.zone ?? 1, zoneLabel: d.zoneLabel ?? '', annualProbability: d.annualProbability ?? '', fiveYearProbability: d.fiveYearProbability ?? '', floodTypes: d.floodTypes ?? [], postcode: pc }); })
         .catch(e => setFloodError(`Flood risk: ${e.message ?? 'network error'}`))
@@ -464,7 +465,7 @@ export function CalculatorScreen() {
     setPlanningData(null);
     setPlanningNote(null);
     setPlanningCouncil('');
-    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: AbortSignal.timeout(10000) })
+    fetch(`https://planning.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
       .then(r => r.json())
       .then((d: any) => {
         if (d.error) throw new Error(d.error);
