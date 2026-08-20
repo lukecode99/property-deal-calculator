@@ -1,16 +1,16 @@
 {
-  "fetchedAt": "2026-08-19T01:00:37.146Z",
+  "fetchedAt": "2026-08-20T01:00:35.442Z",
   "baseRate": {
     "value": 3.75,
-    "source": "Bank Rate 3.75% — corroborated 2026-07-30 against SONIA 3.73% (BoE via FRED IUDSOIA); BoE IADB blocked from this host [carried forward from 2026-08-18]"
+    "source": "Bank Rate 3.75% — corroborated 2026-07-30 against SONIA 3.73% (BoE via FRED IUDSOIA); BoE IADB blocked from this host [carried forward from 2026-08-19]"
   },
   "btlMortgageRate": {
     "value": 5.3,
     "source": "BoE base 3.75% + 1.5% BTL spread"
   },
   "housePriceGrowth": {
-    "value": 2.7,
-    "source": "Land Registry HPI (2026-05)"
+    "value": 2,
+    "source": "Land Registry HPI (2026-06)"
   },
   "rentalGrowth": {
     "value": 6.1,
