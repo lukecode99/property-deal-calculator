@@ -1,8 +1,8 @@
 {
-  "fetchedAt": "2026-09-22T01:00:33.945Z",
+  "fetchedAt": "2026-09-23T01:00:36.553Z",
   "baseRate": {
     "value": 3.75,
-    "source": "Bank Rate 3.75% — corroborated 2026-07-30 against SONIA 3.73% (BoE via FRED IUDSOIA); BoE IADB blocked from this host [carried forward from 2026-09-21]"
+    "source": "Bank Rate 3.75% — corroborated 2026-07-30 against SONIA 3.73% (BoE via FRED IUDSOIA); BoE IADB blocked from this host [carried forward from 2026-09-22]"
   },
   "btlMortgageRate": {
     "value": 5.3,
