@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Property Deal Calculator — Data Sources &amp; Licensing</title>
+<style>
+  :root { --ink:#16202b; --muted:#5c6b7a; --line:#e3e8ee; --accent:#1f6feb; --ok:#1a7f4b; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); line-height:1.5; margin:0; padding:40px 28px; max-width:860px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:34px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+  .sub { color:var(--muted); font-size:14px; margin:0 0 6px; }
+  p { margin:10px 0; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .lead { font-size:15px; }
+  .ogl { background:#f1f8f3; border:1px solid #cce8d6; border-radius:8px; padding:14px 16px; margin:18px 0; }
+  .ogl strong { color:var(--ok); }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:13.5px; }
+  th,td { text-align:left; vertical-align:top; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { background:#f7f9fb; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  td.src { font-weight:600; white-space:nowrap; }
+  .lic { white-space:nowrap; }
+  .attrib { background:#f7f9fb; border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin:10px 0; font-size:13px; }
+  .attrib code { display:block; margin:6px 0; padding:8px 10px; background:#fff; border:1px solid var(--line); border-radius:6px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; white-space:normal; }
+  footer { margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:12.5px; }
+  @media print { body { padding:0; } a { color:var(--ink); } }
+</style>
+</head>
+<body>
+
+<h1>Property Deal Calculator — Data Sources &amp; Licensing</h1>
+<p class="sub">Bundle ID: com.lukeholder.propertydealcalc · United Kingdom · Last reviewed 6 November 2026</p>
+
+<p class="lead">This document lists every external data source used by Property Deal Calculator, what each one provides,
+and the licence under which we are permitted to use it. The app is a <strong>calculation and information tool
+for the United Kingdom only</strong>. It provides illustrative figures based on numbers the user enters plus
+publicly available data; it does not give regulated financial, mortgage, tax or investment advice and does not
+transact or arrange any financial product.</p>
+
+<div class="ogl">
+<strong>The majority of our data is UK public-sector open data published under the Open Government Licence v3.0 (OGL).</strong>
+The OGL explicitly grants the right to <em>copy, publish, distribute, adapt and exploit the information
+commercially</em>, provided the source is acknowledged. Full licence text:
+<a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">nationalarchives.gov.uk/doc/open-government-licence/version/3</a>.
+No scraped, proprietary or restricted third-party datasets are used.
+</div>
+
+<h2>1. In-app data sources (keyed on the user-entered postcode)</h2>
+<p>These are reached through our own Cloudflare Worker endpoints, which proxy the following public UK data:</p>
+
+<table>
+<thead><tr><th>Source</th><th>Used for</th><th>Licence</th><th>Reference</th></tr></thead>
+<tbody>
+<tr>
+  <td class="src">HM Land Registry — Price Paid Data</td>
+  <td>Sold-price history for an area</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads">gov.uk Price Paid Data</a></td>
+</tr>
+<tr>
+  <td class="src">Environment Agency</td>
+  <td>Flood-risk rating</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://environment.data.gov.uk/">environment.data.gov.uk</a></td>
+</tr>
+<tr>
+  <td class="src">Local-authority planning registers<br>(via planning.data.gov.uk)</td>
+  <td>Nearby planning applications</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.planning.data.gov.uk/">planning.data.gov.uk</a></td>
+</tr>
+<tr>
+  <td class="src">Energy Performance of Buildings Register (EPC)</td>
+  <td>Energy-efficiency rating (EPC band)</td>
+  <td class="lic">OGL v3.0<br>© Crown copyright</td>
+  <td><a href="https://get-energy-performance-data.communities.gov.uk/">get-energy-performance-data.communities.gov.uk</a></td>
+</tr>
+<tr>
+  <td class="src">police.uk</td>
+  <td>Street-level crime statistics</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://data.police.uk/about/">data.police.uk/about</a></td>
+</tr>
+<tr>
+  <td class="src">Department for Transport — NaPTAN</td>
+  <td>Nearby stations &amp; transport stops</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.data.gov.uk/dataset/ff93ffc1-6656-47d8-9155-85ea0b8f2251/naptan">data.gov.uk NaPTAN</a></td>
+</tr>
+<tr>
+  <td class="src">Valuation Office Agency — Local Housing Allowance rates</td>
+  <td>Local rent benchmark</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://lha-direct.voa.gov.uk/">lha-direct.voa.gov.uk</a></td>
+</tr>
+<tr>
+  <td class="src">Office for National Statistics</td>
+  <td>Local employment figures</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.ons.gov.uk/help/termsandconditions">ons.gov.uk terms</a></td>
+</tr>
+<tr>
+  <td class="src">Department for Education<br>(Get Information About Schools / Ofsted)</td>
+  <td>Nearby schools &amp; Ofsted ratings</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://get-information-schools.service.gov.uk/">get-information-schools.service.gov.uk</a></td>
+</tr>
+<tr>
+  <td class="src">postcodes.io</td>
+  <td>Postcode validation &amp; geocoding (lat/long)</td>
+  <td class="lic">MIT (software)<br>OGL v3.0 (data)</td>
+  <td><a href="https://postcodes.io/">postcodes.io</a> · <a href="https://github.com/ideal-postcodes/postcodes.io">source</a></td>
+</tr>
+</tbody>
+</table>
+
+<h2>2. Market-reference data (national figures shown as defaults)</h2>
+<table>
+<thead><tr><th>Source</th><th>Used for</th><th>Licence</th><th>Reference</th></tr></thead>
+<tbody>
+<tr>
+  <td class="src">Bank of England — Statistical Database (IADB)</td>
+  <td>Bank Rate (base rate)</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.bankofengland.co.uk/boeapps/database/">bankofengland.co.uk/boeapps/database</a></td>
+</tr>
+<tr>
+  <td class="src">HM Land Registry — UK House Price Index</td>
+  <td>Annual house-price growth</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.gov.uk/government/collections/uk-house-price-index-reports">gov.uk UK HPI reports</a></td>
+</tr>
+<tr>
+  <td class="src">ONS — Index of Private Housing Rental Prices</td>
+  <td>Annual rental growth</td>
+  <td class="lic">OGL v3.0</td>
+  <td><a href="https://www.ons.gov.uk/economy/inflationandpriceindices/bulletins/indexofprivatehousingrentalprices/latest">ons.gov.uk PIPR</a></td>
+</tr>
+</tbody>
+</table>
+
+<h2>3. Advertising (not a data source)</h2>
+<table>
+<thead><tr><th>Service</th><th>Used for</th><th>Terms</th><th>Reference</th></tr></thead>
+<tbody>
+<tr>
+  <td class="src">Google AdMob</td>
+  <td>A single banner advert. Non-personalised — no App Tracking Transparency prompt and no cross-app tracking.</td>
+  <td class="lic">Google publisher terms</td>
+  <td><a href="https://support.google.com/admob/answer/6128543">AdMob policies</a> · <a href="https://policies.google.com/technologies/partner-sites">Google partner-sites</a></td>
+</tr>
+</tbody>
+</table>
+
+<h2>Access notes &amp; authorisation</h2>
+<p>All sources above are open to the public and licensed for reuse, including commercial reuse, under the terms linked.
+The only source that requires an account to obtain data in bulk is the <strong>EPC register</strong>, which we access
+through the official GOV.UK "Get energy performance data" service using a registered GOV.UK One Login account; the data
+itself remains licensed under OGL v3.0. No source requires a commercial agreement, paid licence, or special authorisation
+that we do not hold.</p>
+
+<h2>Required attributions / acknowledgements</h2>
+<div class="attrib">
+These acknowledgements are carried in the app and reproduced here:
+<code>Contains HM Land Registry data © Crown copyright and database right 2026. This data is licensed under the Open Government Licence v3.0.</code>
+<code>Contains public sector information licensed under the Open Government Licence v3.0.</code>
+<code>Contains Ordnance Survey and Office for National Statistics data © Crown copyright and database right 2026, licensed under the Open Government Licence v3.0 (postcode geocoding via postcodes.io).</code>
+<code>Energy Performance of Buildings data © Crown copyright, licensed under the Open Government Licence v3.0.</code>
+<code>Crime data from police.uk, licensed under the Open Government Licence v3.0.</code>
+</div>
+
+<footer>
+Property Deal Calculator · Published by Luke Holder · Support: nanoluke521@gmail.com<br>
+This page is also available online at
+<a href="https://lukecode99.github.io/property-deal-calculator/data-sources.html">lukecode99.github.io/property-deal-calculator/data-sources.html</a>.
+</footer>
+
+</body>
+</html>
