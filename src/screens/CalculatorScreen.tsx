@@ -211,7 +211,7 @@ export function CalculatorScreen() {
     }, 400); // debounce — inputs change per keystroke
     return () => clearTimeout(t);
   }, [inputs, hydrated]);
-  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'schools'>('sold');
+  const [ddTab, setDdTab] = useState<'sold' | 'flood' | 'mining' | 'planning' | 'epc' | 'crime' | 'transport' | 'rental' | 'employment' | 'schools'>('sold');
 
   type SoldSale = { price: number; date: string; type: string; tenure: string; newBuild: boolean; address: string };
   const [soldPostcode, setSoldPostcode] = useState('');
@@ -271,6 +271,11 @@ export function CalculatorScreen() {
   const [schoolsData, setSchoolsData] = useState<SchoolResult[] | null>(null);
   const [schoolsLoading, setSchoolsLoading] = useState(false);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
+
+  type CoalRisk = { level: 'high' | 'low' | 'none'; inCoalfield: boolean; label: string; detail: string; advice: string; postcode: string };
+  const [coalData, setCoalData] = useState<CoalRisk | null>(null);
+  const [coalLoading, setCoalLoading] = useState(false);
+  const [coalError, setCoalError] = useState<string | null>(null);
 
   const [ddPostcode, setDdPostcode] = useState('');
 
@@ -336,6 +341,7 @@ export function CalculatorScreen() {
     setTransportLoading(true); setTransportError(null); setTransportData(null);
     setRentalLoading(true); setRentalError(null); setRentalData(null);
     setSchoolsLoading(true); setSchoolsError(null); setSchoolsData(null);
+    setCoalLoading(true); setCoalError(null); setCoalData(null);
     // Existence gate — validate postcode via postcodes.io before firing all workers.
     // Non-existent postcodes pass the regex but return 404 from the API.
     fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
@@ -392,6 +398,12 @@ export function CalculatorScreen() {
           .then((d: any) => { if (d.error) throw new Error(d.error); setSchoolsData((d.schools ?? []).slice(0, 10)); })
           .catch(e => setSchoolsError(`Schools: ${e.message ?? 'network error'} — tap Search to retry`))
           .finally(() => setSchoolsLoading(false));
+        // Coal mining legacy risk
+        fetch(`https://coal-risk.nanoluke521.workers.dev/?postcode=${encodeURIComponent(pc)}`, { signal: timeoutSignal(10000) })
+          .then(r => r.json())
+          .then((d: any) => { if (d.error) throw new Error(d.error); setCoalData({ level: d.level, inCoalfield: d.inCoalfield, label: d.label, detail: d.detail, advice: d.advice, postcode: pc }); })
+          .catch(e => setCoalError(`Mining risk: ${e.message ?? 'network error'} — tap Search to retry`))
+          .finally(() => setCoalLoading(false));
       })
       .catch(e => {
         // Postcode doesn't exist or gate timed out — propagate to all source tabs
@@ -404,6 +416,7 @@ export function CalculatorScreen() {
         setTransportError(msg); setTransportLoading(false);
         setRentalError(msg); setRentalLoading(false);
         setSchoolsError(msg); setSchoolsLoading(false);
+        setCoalError(msg); setCoalLoading(false);
       });
   }
 
@@ -819,6 +832,7 @@ export function CalculatorScreen() {
               {([
                 { key: 'sold', label: 'Sold' },
                 { key: 'flood', label: 'Flood' },
+                { key: 'mining', label: 'Mining' },
                 { key: 'planning', label: 'Planning' },
                 { key: 'epc', label: 'EPC' },
                 { key: 'crime', label: 'Crime' },
@@ -884,6 +898,30 @@ export function CalculatorScreen() {
                       </View>
                     </View>
                     <Text style={styles.floodDisclaimer}>Source: EA Flood Zones via Planning Data (official UK planning classification). Not a substitute for a full flood risk assessment.</Text>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Coal mining risk sub-tab */}
+            {ddTab === 'mining' && (
+              <View style={styles.card}>
+                {coalError && <Text style={styles.soldError}>{coalError}</Text>}
+                {!coalData && !coalLoading && !coalError && <Text style={styles.soldNone}>Enter a postcode above and tap Search to look up coal mining risk.</Text>}
+                {coalLoading && !coalData && <Text style={styles.soldNone}>Looking up coal mining risk…</Text>}
+                {coalData && (
+                  <>
+                    <View style={styles.floodLevelRow}>
+                      <Text style={styles.floodLevelIcon}>
+                        {coalData.level === 'none' ? '🟢' : coalData.level === 'low' ? '🟡' : '🔴'}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.floodLevelLabel}>{coalData.label} — {coalData.postcode}</Text>
+                        <Text style={styles.floodLevelSub}>{coalData.detail}</Text>
+                        <Text style={styles.floodLevelSub}>{coalData.advice}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.floodDisclaimer}>Source: Mining Remediation Authority (formerly the Coal Authority) open data — Development High/Low Risk Areas. Not a substitute for a CON29M coal mining search.</Text>
                   </>
                 )}
               </View>
