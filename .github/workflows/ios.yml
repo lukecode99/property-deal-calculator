@@ -6,6 +6,12 @@ on:
     branches: [main]
     paths: ['src/**', 'App.tsx', 'app.json', 'package.json']
 
+# A newer dispatch supersedes any build still running — cancel it rather
+# than uploading a stale binary and burning a TestFlight slot.
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-26
