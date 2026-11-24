@@ -1,8 +1,8 @@
 {
-  "fetchedAt": "2026-11-23T02:03:42.877Z",
+  "fetchedAt": "2026-11-24T02:03:30.390Z",
   "baseRate": {
     "value": 4,
-    "source": "Inferred from SONIA 3.98% (2026-11-18), rounded to nearest 0.25% Bank Rate step — BoE via FRED IUDSOIA"
+    "source": "Inferred from SONIA 3.98% (2026-11-19), rounded to nearest 0.25% Bank Rate step — BoE via FRED IUDSOIA"
   },
   "btlMortgageRate": {
     "value": 5.5,
